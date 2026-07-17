@@ -13,6 +13,8 @@ import {
   fetchPreset,
   savePreset,
   deletePreset,
+  fetchEngine,
+  setEngine,
 } from './api.js';
 import { StatsUi } from './stats-ui.js';
 import { SpeedMatcher } from './speed.js';
@@ -28,6 +30,10 @@ const refs = {
   videoStage: $('video-stage'),
   videoHint: $('video-hint'),
   overlay: $('overlay'),
+  preview: $('preview'),
+  engineBtn: $('engine-btn'),
+  engineSettings: $('engine-settings'),
+  engineDevice: $('engine-device'),
   cameraSelect: $('camera-select'),
   startBtn: $('start-btn'),
   stopBtn: $('stop-btn'),
@@ -107,22 +113,32 @@ function setStatus(text, running = state.running) {
   refs.status.classList.toggle('running', running);
 }
 
+// --- server engine state (the UI is a window onto the server when it runs) ---
+let engineStatus = null; // last /api/engine payload
+const engineRunning = () => Boolean(engineStatus?.running);
+
 // --- coordinate helpers ---
 const videoSize = () => ({ w: refs.video.videoWidth, h: refs.video.videoHeight });
 
+/** Working frame dimensions: the engine's source when it counts, else the local video. */
+function frameSize() {
+  if (engineRunning() && engineStatus.frame) return engineStatus.frame;
+  return videoSize();
+}
+
 function toPixels(norm) {
-  const { w, h } = videoSize();
+  const { w, h } = frameSize();
   if (!w) return null;
   return { x: norm.x * w, y: norm.y * h };
 }
 
 function toNorm(p) {
-  const { w, h } = videoSize();
+  const { w, h } = frameSize();
   return { x: p.x / w, y: p.y / h };
 }
 
 function shapesToPixels() {
-  const { w } = videoSize();
+  const { w } = frameSize();
   if (!w) return { lines: [], zones: [] };
   return {
     lines: state.lines.map((l) => ({ id: l.id, a: toPixels(l.a), b: toPixels(l.b) })),
@@ -132,7 +148,7 @@ function shapesToPixels() {
 
 /** Adopt the editor's pixel-space shapes as the new normalized truth. */
 function adoptShapes(px) {
-  const { w } = videoSize();
+  const { w } = frameSize();
   if (!w) return;
   state.lines = px.lines.map((l) => ({ id: l.id, a: toNorm(l.a), b: toNorm(l.b) }));
   state.zones = px.zones.map((z) => ({ id: z.id, points: z.points.map(toNorm) }));
@@ -310,7 +326,7 @@ refs.zoom.addEventListener('input', () => {
 
 /** Visible-region origin in video pixels (0,0 at 1×), zoom factor and frame size. */
 function viewRect() {
-  const { w, h } = videoSize();
+  const { w, h } = frameSize();
   const { z, cx, cy } = state.view;
   if (z <= 1 || !w) return { z: 1, visX: 0, visY: 0, vw: w, vh: h };
   return {
@@ -551,6 +567,13 @@ setInterval(() => {
 }, 500);
 
 function updatePerfChip() {
+  if (engineRunning()) {
+    const s = engineStatus;
+    refs.perf.textContent = `${s.frame.w}×${s.frame.h} · det ${s.detPerSec}/s · ${s.detMs} ms · ${s.ep} (server)`;
+    refs.perf.hidden = false;
+    refs.perf.classList.remove('warn');
+    return;
+  }
   const now = performance.now();
   const seconds = (now - perf.windowStart) / 1000;
   perf.windowStart = now;
@@ -580,7 +603,7 @@ function frame() {
   overlay.resize();
   if (!HAS_RVFC) step(Date.now());
   overlay.draw({
-    tracks: state.running ? tracker.tracks : [],
+    tracks: engineRunning() ? engineStatus.tracks : state.running ? tracker.tracks : [],
     lines: editor.shapes.lines,
     zones: editor.shapes.zones,
     selection: editor.selection,
@@ -685,10 +708,59 @@ refs.stopBtn.addEventListener('click', () => {
   sink.flush();
 });
 
+// --- server engine control ---
+let previewTimer = null;
+
+function applyEngineUi() {
+  const running = engineRunning();
+  document.body.classList.toggle('engine-mode', running);
+  refs.preview.hidden = !running;
+  refs.engineBtn.textContent = running ? 'Stop server counting' : 'Start server counting';
+  refs.engineBtn.classList.toggle('active', running);
+  clearInterval(previewTimer);
+  if (running) {
+    refs.videoHint.hidden = true;
+    setStatus(state.lines.length ? 'counting (server)' : 'server engine on — add a counting line', true);
+    previewTimer = setInterval(() => {
+      refs.preview.src = `/api/preview?t=${Date.now()}`;
+    }, 300);
+    editor.setShapes(shapesToPixels());
+  } else if (!state.running) {
+    refs.videoHint.hidden = false;
+    setStatus('ready — start a camera', false);
+    // The browser becomes the fallback counter; load its model if needed.
+    if (!detector.ready) loadModel(state.model).catch(() => {});
+  }
+}
+
+async function pollEngine() {
+  try {
+    const next = await fetchEngine();
+    const changed = Boolean(next.running) !== engineRunning();
+    engineStatus = next.available === false ? null : next;
+    if (changed) applyEngineUi();
+  } catch {}
+}
+
+refs.engineBtn.addEventListener('click', async () => {
+  refs.engineBtn.disabled = true;
+  try {
+    engineStatus = await setEngine({
+      running: !engineRunning(),
+      device: refs.engineDevice.value || '0',
+    });
+    applyEngineUi();
+  } catch (err) {
+    alert(`Engine: ${err.message}`);
+  } finally {
+    refs.engineBtn.disabled = false;
+  }
+});
+
 // --- toolbar ---
 function requireVideo() {
-  if (videoSize().w) return true;
-  setStatus('start a camera or video first', false);
+  if (frameSize().w) return true;
+  setStatus('start a camera or video first (or the server engine)', false);
   return false;
 }
 
@@ -885,7 +957,21 @@ if ('serviceWorker' in navigator) {
   refreshCameraList();
   navigator.mediaDevices?.addEventListener?.('devicechange', refreshCameraList);
   requestAnimationFrame(frame);
+
+  // Server engine first: when it's available the browser is a pure viewer.
+  await pollEngine();
+  if (engineStatus) {
+    refs.engineBtn.hidden = false;
+    refs.engineSettings.hidden = false;
+    setInterval(pollEngine, 600);
+    applyEngineUi();
+  }
+
   await populateModelSelect();
+  if (engineRunning()) {
+    setStatus(state.lines.length ? 'counting (server)' : 'server engine on — add a counting line', true);
+    return; // no browser detection needed; the model loads lazily if engine stops
+  }
   let loaded = await loadModel(state.model);
   if (!loaded && state.model !== 'coco-ssd') {
     state.model = 'coco-ssd';

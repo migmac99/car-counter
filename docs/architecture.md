@@ -131,13 +131,30 @@ Video frames never leave the browser. The server stores only numeric crossing
 events. There is no tracking, no third-party requests after `bun run setup`
 (with vendored model), and the whole system runs air-gapped.
 
-## Headless worker (`worker/`)
+## The counting engine (`worker/engine.js`)
 
-The optional worker realizes the "any process can produce events" design:
-ffmpeg captures frames (AVFoundation webcam or a video file), YOLOX runs on
-`onnxruntime-node` (CoreML on Apple silicon → CPU fallback), and the **same
-pure modules the browser uses** — `tracker.js`, `counter.js`, `speed.js`,
-`yolox.js` decode — do the counting. It reads the shared config from
-`GET /api/config` (including the zoom view crop) and posts events with
-`source: "headless"`. The worker keeps its dependencies in its own
-`worker/package.json`, so the app itself stays zero-dependency.
+The server **hosts the counting pipeline itself**: `CountingEngine` captures
+frames with ffmpeg (AVFoundation webcam or a video file), runs YOLOX on
+`onnxruntime-node` (CoreML on Apple silicon → CPU fallback), and counts with
+the **same pure modules the browser uses** — `tracker.js`, `counter.js`,
+`speed.js`, `yolox.js` decode. Events go straight into the Store; ffmpeg
+additionally emits a rate-limited, atomically-updated JPEG that the server
+exposes as `GET /api/preview`, so the web UI can display the road, draw
+shapes and show live tracks **without ever touching the camera** — the page
+is a pure window onto the server.
+
+- `GET /api/engine` — status: running, model, execution provider, det/s,
+  latency, counted, live track snapshot for the overlay.
+- `PUT /api/engine {running, device?, size?, fps?, input?}` — start/stop;
+  enablement persists in the config, so the engine auto-starts with the
+  server.
+- `PUT /api/config` nudges the running engine: thresholds/lines/zones apply
+  live; a view (zoom) or model change restarts the capture with the new
+  crop.
+
+The engine is optional: without ffmpeg or the worker deps
+(`bun install --cwd worker`) the server runs as before and the **browser
+pipeline does the counting** (fallback mode). Both must not count the same
+camera at once — the UI hides its camera controls while the engine runs.
+`worker/index.js` remains a thin CLI around the same engine class for
+running capture on a different machine than the server, posting over HTTP.

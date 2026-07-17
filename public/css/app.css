@@ -124,6 +124,7 @@ main {
   will-change: transform;
 }
 .video-wrap video,
+.video-stage img,
 .video-wrap canvas {
   position: absolute;
   inset: 0;
@@ -131,6 +132,8 @@ main {
   height: 100%;
   object-fit: contain;
 }
+.video-stage img[hidden] { display: none; }
+body.engine-mode .source-controls { display: none; }
 .video-wrap canvas { cursor: default; }
 .video-wrap.zoomed canvas { cursor: grab; }
 .video-wrap.editing canvas { cursor: crosshair; }

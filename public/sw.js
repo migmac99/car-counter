@@ -73,11 +73,12 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Everything else (app shell and /api reads): network-first so updates and
-  // fresh stats always win online; fall back to cache when offline.
+  // fresh stats always win online; fall back to cache when offline. Preview
+  // frames are ephemeral — never cache them.
   event.respondWith(
     fetch(event.request)
       .then((res) => {
-        if (res.ok) {
+        if (res.ok && !url.pathname.startsWith('/api/preview')) {
           const copy = res.clone();
           caches.open(RUNTIME_CACHE).then((cache) => cache.put(event.request, copy));
         }

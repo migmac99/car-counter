@@ -3,6 +3,20 @@ import { Store } from './db.js';
 import { routes, ApiError } from './api.js';
 import { makeStaticHandler } from './static.js';
 
+// The counting engine is optional: it needs ffmpeg plus the worker's
+// onnxruntime-node dependency (bun install --cwd worker). Without them the
+// server still runs fully — the browser does the counting instead.
+let engineModule = null;
+let engineUnavailableReason = null;
+try {
+  engineModule = await import('../worker/engine.js');
+  engineUnavailableReason = engineModule.checkRequirements();
+  if (engineUnavailableReason) engineModule = null;
+} catch {
+  engineUnavailableReason =
+    "engine dependencies not installed — run: bun install --cwd worker (and ensure ffmpeg is installed)";
+}
+
 const ROOT = resolve(import.meta.dir, '..');
 const MAX_BODY_BYTES = 512 * 1024;
 
@@ -31,6 +45,12 @@ const SECURITY_HEADERS = {
 export function createApp({ dbFile = join(ROOT, 'data', 'car-counter.sqlite') } = {}) {
   const store = new Store(dbFile);
   const serveStatic = makeStaticHandler(join(ROOT, 'public'));
+  const engine = engineModule
+    ? new engineModule.CountingEngine({
+        getConfig: () => store.getConfig('app') ?? {},
+        postEvents: (events) => store.insertEvents(events),
+      })
+    : null;
 
   async function handle(req, url) {
     if (!url.pathname.startsWith('/api/')) {
@@ -55,7 +75,14 @@ export function createApp({ dbFile = join(ROOT, 'data', 'car-counter.sqlite') } 
           throw new ApiError(400, 'body must be valid JSON');
         }
       }
-      const result = handler(store, { query: url.searchParams, body, rawBody });
+      const result = await handler(store, {
+        query: url.searchParams,
+        body,
+        rawBody,
+        engine,
+        engineUnavailableReason,
+      });
+      if (result instanceof Response) return result;
       return Response.json(result);
     } catch (err) {
       const status = err instanceof ApiError ? err.status : 500;
@@ -73,7 +100,7 @@ export function createApp({ dbFile = join(ROOT, 'data', 'car-counter.sqlite') } 
     return res;
   }
 
-  return { fetch, store };
+  return { fetch, store, engine };
 }
 
 export function startServer({
@@ -88,22 +115,37 @@ export function startServer({
     maxRequestBodySize: MAX_BODY_BYTES,
     fetch: app.fetch,
   });
-  return { server, store: app.store };
+  return { server, store: app.store, engine: app.engine };
 }
 
 if (import.meta.main) {
   // Under `bun --hot` this module re-evaluates on every save; Bun.serve reuses
   // the listening socket and swaps the fetch handler in place. Close the
   // previous run's DB connection and register signal handlers only once.
+  await globalThis.__carCounter?.engine?.stop();
   globalThis.__carCounter?.store.close();
   globalThis.__carCounter = startServer();
-  const { server } = globalThis.__carCounter;
+  const { server, store, engine } = globalThis.__carCounter;
   console.log(`car-counter listening on http://localhost:${server.port} (bound to ${server.hostname})`);
   console.log('Note: camera access from other devices requires HTTPS — see docs/user-guide.md');
+  if (engine) {
+    const saved = store.getConfig('app')?.engine;
+    if (saved?.enabled) {
+      engine
+        .start(saved)
+        .then(() => console.log(`engine: counting from ${engine.state.source} (${engine.state.model}/${engine.state.ep})`))
+        .catch((err) => console.error(`engine: could not start (${err.message}) — start it from the web UI`));
+    } else {
+      console.log('engine: available — enable server-side counting from the web UI (or PUT /api/engine)');
+    }
+  } else {
+    console.log(`engine: unavailable (${engineUnavailableReason}) — the browser will do the counting`);
+  }
   if (!globalThis.__carCounterSignals) {
     globalThis.__carCounterSignals = true;
     for (const signal of ['SIGINT', 'SIGTERM']) {
-      process.on(signal, () => {
+      process.on(signal, async () => {
+        await globalThis.__carCounter.engine?.stop();
         globalThis.__carCounter.server.stop();
         globalThis.__carCounter.store.close();
         process.exit(0);

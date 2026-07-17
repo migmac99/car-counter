@@ -158,32 +158,36 @@ the header forces a check right now.
 
 ## Running unattended
 
-### Truly headless: the worker (recommended)
+### The server counts by itself (recommended)
 
-`bun run worker` counts **without any browser**: it captures the camera
-with ffmpeg, runs YOLOX on Apple's CoreML (or CPU), reuses the exact same
-lines/zones/zoom/speed configuration you drew in the web UI, and posts to
-the same dashboard. Close every tab, lock the screen — counting continues
-as long as the server and worker run.
+With the engine enabled, **the server owns the camera and counts 24/7** —
+the web UI is just a live window onto it (the video you see is the server's
+own preview). Close every tab, quit the browser, lock the screen: counting
+continues as long as the server runs.
 
-```sh
-bun start                      # the server (dashboard + storage)
-bun run worker                 # headless counting from camera 0
-bun worker/index.js --list-devices    # find your camera's index
-bun worker/index.js --device 1        # use a specific camera
-bun worker/index.js --input clip.mp4  # process recorded footage
-```
+One-time setup: `brew install ffmpeg` and `bun install --cwd worker`; then
+click **Start server counting** in the toolbar. macOS will ask once for
+camera permission — for your **terminal** app this time, since the server
+does the capturing. Enablement persists: the engine auto-starts whenever
+the server starts. Pick the camera index in Settings → Engine camera #
+(`bun worker/index.js --list-devices` lists them).
 
-Requirements: `ffmpeg` (`brew install ffmpeg`), and macOS will ask once for
-camera permission for your terminal. **Run either the worker or a browser
-tab with the camera — not both — or every car counts twice.** The dashboard
-in any browser stays read-only safe. Prevent system sleep
-(`caffeinate -dis`) — sleep still pauses everything.
+While the engine runs, the browser's own camera controls are hidden (two
+counters on one camera would double-count) and the perf chip shows the
+server's numbers (`… · coreml (server)`). All editing — lines, zones,
+zoom, presets — works exactly the same, applied live to the engine.
 
-### In the browser (kiosk mode)
+Prevent system sleep (`caffeinate -dis`) — sleep still pauses everything,
+and the engine re-acquires the camera automatically on wake.
 
-Without the worker, counting happens **in the page** — the server only
-stores results:
+`worker/index.js` remains as a standalone CLI for running the capture on a
+**different machine** than the server (`--server http://host:3000`), or for
+batch-processing recorded footage (`--input clip.mp4`).
+
+### In the browser (fallback mode)
+
+Without the engine (no ffmpeg / worker deps), counting happens **in the
+page** — the server only stores results:
 
 - **Keep the page open.** Closing the tab stops the camera and the
   counting; the server keeps serving stats but records nothing new. The

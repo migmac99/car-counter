@@ -126,6 +126,14 @@ Named copies of the config object, stored server-side:
 
 Names: 1–40 characters — letters, digits, spaces, `-`, `_`.
 
+## Engine (server-side counting)
+
+| Endpoint | Effect |
+|---|---|
+| `GET /api/engine` | Status: `{available, running, model, ep, frame, detPerSec, detMs, counted, tracks[], source, error}` — or `{available: false, reason}` |
+| `PUT /api/engine` | `{running: true|false, device?, size?, fps?, input?, loop?}` — start/stop capture; camera enablement persists and auto-starts with the server |
+| `GET /api/preview` | Latest full-frame JPEG from the engine (no-store; 404 when not running) |
+
 ## `DELETE /api/events?confirm=yes`
 
 Deletes **all** recorded events. Returns 400 without `confirm=yes`.

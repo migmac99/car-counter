@@ -26,6 +26,7 @@
       <div class="video-wrap" id="video-wrap">
         <div class="video-stage" id="video-stage">
           <video id="video" playsinline muted></video>
+          <img id="preview" alt="" hidden />
         </div>
         <canvas id="overlay"></canvas>
         <div id="video-hint" class="video-hint">
@@ -35,14 +36,17 @@
       </div>
 
       <div class="toolbar">
-        <select id="camera-select" aria-label="Camera">
-          <option value="">Default camera</option>
-        </select>
-        <button id="start-btn" class="primary">Start camera</button>
-        <label class="file-btn">Open video…
-          <input id="file-input" type="file" accept="video/*" hidden />
-        </label>
-        <button id="stop-btn" disabled>Stop</button>
+        <button id="engine-btn" hidden title="Counting runs inside the server — keeps going with every browser closed">Start server counting</button>
+        <span class="source-controls">
+          <select id="camera-select" aria-label="Camera">
+            <option value="">Default camera</option>
+          </select>
+          <button id="start-btn" class="primary">Start camera</button>
+          <label class="file-btn">Open video…
+            <input id="file-input" type="file" accept="video/*" hidden />
+          </label>
+          <button id="stop-btn" disabled>Stop</button>
+        </span>
         <span class="spacer"></span>
         <button id="draw-line-btn" title="Click two points across the road; each line counts separately">Add line</button>
         <button id="add-lanes-btn" title="Draw one line across the whole road and split it into per-lane counting lines">Add lanes…</button>
@@ -80,6 +84,11 @@
               <option value="rev">reverse only</option>
             </select>
           </label>
+          <div class="group" id="engine-settings" hidden>
+            <label>Engine camera #
+              <input id="engine-device" type="number" min="0" max="9" step="1" value="0" class="num" title="AVFoundation device index (bun worker/index.js --list-devices)" />
+            </label>
+          </div>
           <div class="group" id="speed-settings">
             <label>Speed gates
               <select id="gate-a" title="First gate line"></select>

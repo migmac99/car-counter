@@ -37,26 +37,32 @@ crossing events in SQLite and serves aggregated statistics.
 - **History** — minute/hour/day buckets with charts and a table view
 - **Installable PWA** that keeps working offline and self-updates when online
 - **Video-file mode** — analyze recorded footage instead of a live camera
-- **Headless worker** — `bun run worker` counts **without a browser**
-  (ffmpeg capture + CoreML/CPU inference), sharing the same config and
-  feeding the same dashboard
+- **Server-hosted counting engine** — the server itself captures the camera
+  (ffmpeg) and counts (CoreML/CPU via ONNX Runtime), **24/7, with every
+  browser closed**; the web UI is a live window onto it (server preview
+  stream + live tracks). Browser-side detection remains as a fallback mode.
 - **Zero npm dependencies** in the app — [Bun](https://bun.sh) built-ins only
-  (`Bun.serve`, `bun:sqlite`); the optional worker has its own isolated deps
+  (`Bun.serve`, `bun:sqlite`); the optional engine keeps its one dependency
+  isolated in `worker/`
 
 ## Quickstart
 
 Requires Bun ≥ 1.1 (`curl -fsSL https://bun.sh/install | bash` or `brew install bun`).
 
 ```sh
-bun run setup   # one-time: ML runtimes + models (~45 MB; add --model s for YOLOX-s)
-bun start       # serve on http://localhost:3000
-bun run dev     # same, with hot reload for development
-bun test        # run the unit + integration test suite
+bun run setup               # one-time: ML runtimes + models (~45 MB; --model s for YOLOX-s)
+bun install --cwd worker    # one-time: enables server-side counting (needs ffmpeg)
+bun start                   # ONE server: dashboard + storage + counting engine
+bun run dev                 # same, with hot reload for development
+bun test                    # run the unit + integration test suite
 ```
 
-Open <http://localhost:3000>, click **Start camera**, then **Add line** and
-click two points across the road. The arrow shows which crossing direction
-counts as *forward*. That's it — counts persist across restarts.
+Open <http://localhost:3000>, click **Start server counting**, then
+**Add line** and click two points across the road (you're drawing on the
+server's own preview). The arrow shows which crossing direction counts as
+*forward*. Close the browser — counting continues; the page is just a
+window onto the server. Counts persist across restarts, and the engine
+auto-starts with the server once enabled.
 
 `PORT` and `HOST` environment variables override the defaults. Skipping
 `bun run setup` also works — the app then loads the model from CDN.

@@ -119,3 +119,18 @@ export async function savePreset(name, config) {
 
 export const deletePreset = (name) =>
   fetch(`/api/preset?name=${encodeURIComponent(name)}`, { method: 'DELETE' });
+
+// --- server-side counting engine ---
+
+export const fetchEngine = () => getJson('/api/engine');
+
+export async function setEngine(body) {
+  const res = await fetch('/api/engine', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? `engine -> ${res.status}`);
+  return data;
+}

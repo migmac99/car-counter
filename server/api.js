@@ -63,12 +63,50 @@ export const routes = {
 
   'GET /api/config': (store) => store.getConfig('app') ?? {},
 
-  'PUT /api/config': (store, { body, rawBody }) => {
+  'PUT /api/config': (store, { body, rawBody, engine }) => {
     if (typeof body !== 'object' || body === null || Array.isArray(body))
       throw new ApiError(400, 'config must be a JSON object');
     if (rawBody.length > MAX_CONFIG_BYTES) throw new ApiError(413, 'config too large');
     store.setConfig('app', body);
+    engine?.applyConfig(); // pick up new lines/zones/view/model immediately
     return { ok: true };
+  },
+
+  // --- server-side counting engine ---
+  'GET /api/engine': (store, { engine, engineUnavailableReason }) =>
+    engine ? engine.status : { available: false, running: false, reason: engineUnavailableReason },
+
+  'PUT /api/engine': async (store, { body, engine, engineUnavailableReason }) => {
+    if (!engine) throw new ApiError(503, `engine unavailable: ${engineUnavailableReason}`);
+    if (typeof body?.running !== 'boolean') throw new ApiError(400, 'body must include running: true|false');
+    const config = store.getConfig('app') ?? {};
+    const source = {
+      device: String(body.device ?? config.engine?.device ?? '0'),
+      size: body.size ?? config.engine?.size ?? '1920x1080',
+      fps: Number(body.fps ?? config.engine?.fps ?? 30),
+      ...(body.input ? { input: body.input, loop: Boolean(body.loop) } : {}),
+    };
+    // Persist enablement (file inputs are one-off runs, not remembered).
+    config.engine = { enabled: body.running && !body.input, device: source.device, size: source.size, fps: source.fps };
+    store.setConfig('app', config);
+    if (body.running) {
+      try {
+        await engine.start(source);
+      } catch (err) {
+        throw new ApiError(500, `engine failed to start: ${err.message}`);
+      }
+    } else {
+      await engine.stop();
+    }
+    return engine.status;
+  },
+
+  'GET /api/preview': async (store, { engine }) => {
+    const jpeg = engine ? await engine.preview() : null;
+    if (!jpeg) throw new ApiError(404, 'no preview available — is the engine running?');
+    return new Response(jpeg, {
+      headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' },
+    });
   },
 
   'DELETE /api/events': (store, { query }) => {
