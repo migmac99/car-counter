@@ -17,12 +17,14 @@ const MIME = {
   '.woff2': 'font/woff2',
 };
 
-// index.html and sw.js must always revalidate so deploys take effect;
-// vendored runtime/model files are immutable at a given path.
+// App code always revalidates (ETag makes that a cheap 304) so deploys take
+// effect immediately; the multi-MB vendored runtime/model and icons are
+// effectively immutable and may be cached hard.
 function cacheControl(pathname) {
-  if (pathname === '/index.html' || pathname === '/sw.js') return 'no-cache';
-  if (pathname.startsWith('/vendor/')) return 'public, max-age=86400';
-  return 'public, max-age=300';
+  if (pathname.startsWith('/vendor/') || pathname.startsWith('/icons/')) {
+    return 'public, max-age=86400';
+  }
+  return 'no-cache';
 }
 
 export function makeStaticHandler(rootDir) {

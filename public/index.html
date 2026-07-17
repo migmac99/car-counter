@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0f172a" />
+  <title>Car Counter</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <header class="app-header">
+    <img src="/icons/icon-192.png" alt="" />
+    <h1>Car Counter</h1>
+    <span id="status" class="status-chip">starting…</span>
+    <span class="spacer"></span>
+    <button id="install-btn" hidden>Install app</button>
+  </header>
+
+  <main>
+    <section class="panel video-panel">
+      <div class="video-wrap" id="video-wrap">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <div id="video-hint" class="video-hint">
+          Start a camera or open a video file, then draw a counting line across the road.
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <select id="camera-select" aria-label="Camera">
+          <option value="">Default camera</option>
+        </select>
+        <button id="start-btn" class="primary">Start camera</button>
+        <label class="file-btn">Open video…
+          <input id="file-input" type="file" accept="video/*" hidden />
+        </label>
+        <button id="stop-btn" disabled>Stop</button>
+        <span class="spacer"></span>
+        <button id="draw-line-btn" title="Click two points across the road">Set counting line</button>
+        <button id="flip-btn" title="Swap which crossing direction is 'forward'">Flip direction</button>
+        <button id="draw-roi-btn" title="Click points around the area to watch; double-click to close">Draw zone</button>
+        <button id="clear-roi-btn">Clear zone</button>
+      </div>
+
+      <details class="settings">
+        <summary>Settings</summary>
+        <div class="settings-body">
+          <label>Min confidence
+            <input id="min-score" type="range" min="0.3" max="0.8" step="0.05" value="0.5" />
+            <span id="min-score-value">0.50</span>
+          </label>
+          <div class="group" id="class-filters">
+            <label><input type="checkbox" value="car" checked />cars</label>
+            <label><input type="checkbox" value="truck" checked />trucks</label>
+            <label><input type="checkbox" value="bus" checked />buses</label>
+            <label><input type="checkbox" value="motorcycle" checked />motorcycles</label>
+          </div>
+          <label>Count
+            <select id="count-mode">
+              <option value="both">both directions</option>
+              <option value="fwd">forward only</option>
+              <option value="rev">reverse only</option>
+            </select>
+          </label>
+          <button id="reset-data" class="danger">Delete all history…</button>
+        </div>
+      </details>
+    </section>
+
+    <section class="panel stats-panel">
+      <h2>Live</h2>
+      <div class="tiles">
+        <div class="tile hero">
+          <div class="tile-value" id="tile-cpm">–</div>
+          <div class="tile-label">cars/min · last 60 s</div>
+        </div>
+        <div class="tile">
+          <div class="tile-value" id="tile-rate5">–</div>
+          <div class="tile-label">avg cars/min · last 5 min</div>
+        </div>
+        <div class="tile">
+          <div class="tile-value" id="tile-hour">–</div>
+          <div class="tile-label">last hour</div>
+        </div>
+        <div class="tile">
+          <div class="tile-value" id="tile-today">–</div>
+          <div class="tile-label">today</div>
+        </div>
+        <div class="tile">
+          <div class="tile-value" id="tile-total">–</div>
+          <div class="tile-label">all time</div>
+        </div>
+      </div>
+      <div class="direction-split">
+        <span><span class="chip chip-fwd"></span>forward <b id="dir-fwd">0</b></span>
+        <span><span class="chip chip-rev"></span>reverse <b id="dir-rev">0</b></span>
+        <span class="muted">today</span>
+      </div>
+      <div class="sparkline-block">
+        <h3>Cars per minute · last 30 min</h3>
+        <div id="sparkline" class="chart chart-small"></div>
+      </div>
+    </section>
+
+    <section class="panel history-panel">
+      <div class="history-head">
+        <h2>History</h2>
+        <div class="seg" id="bucket-seg" role="tablist">
+          <button data-bucket="minute" class="active">Minute</button>
+          <button data-bucket="hour">Hour</button>
+          <button data-bucket="day">Day</button>
+        </div>
+        <select id="range-select" aria-label="Time range"></select>
+      </div>
+      <div id="history-chart" class="chart"></div>
+      <div class="legend">
+        <span><i class="chip chip-fwd"></i>forward (with arrow)</span>
+        <span><i class="chip chip-rev"></i>reverse (against arrow)</span>
+      </div>
+      <details class="table-details">
+        <summary>Table view</summary>
+        <div id="history-table"></div>
+      </details>
+    </section>
+  </main>
+
+  <footer class="muted">
+    Detection runs entirely in your browser — video never leaves this device.
+    <a href="https://github.com/migmac99/car-counter" rel="noopener">Docs</a>
+  </footer>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

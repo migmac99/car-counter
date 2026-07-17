@@ -15,7 +15,9 @@ const SECURITY_HEADERS = {
   'Referrer-Policy': 'no-referrer',
   'Content-Security-Policy': [
     "default-src 'self'",
-    "script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'",
+    // 'unsafe-eval' is required by TensorFlow.js (it generates kernel code
+    // via new Function); see docs/architecture.md#security.
+    "script-src 'self' https://cdn.jsdelivr.net 'unsafe-eval' 'wasm-unsafe-eval'",
     "connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com https://www.kaggle.com https://tfhub.dev",
     "img-src 'self' data: blob:",
     "media-src 'self' blob:",
