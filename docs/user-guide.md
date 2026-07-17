@@ -156,6 +156,29 @@ on every online launch, checks hourly while it stays open, and reloads onto
 new versions when they arrive — installed or not. The **↻ Reload** button in
 the header forces a check right now.
 
+## Running unattended (kiosk mode)
+
+Counting happens **in the browser page** — the server only stores results.
+For continuous counting:
+
+- **Keep the page open.** Closing the tab stops the camera and the
+  counting; the server keeps serving stats but records nothing new. The
+  installed PWA in its own window is the most robust way to leave it
+  running.
+- **Hidden or minimized windows count at reduced rate.** Browsers throttle
+  background pages to roughly one processing tick per second — enough for
+  slow roads, but fast highway traffic will be undercounted. Keep the
+  window visible (it can be small, or on a spare desktop/display) for full
+  frame-rate counting.
+- **Prevent system sleep.** Sleep pauses everything (server included);
+  counting resumes on wake. On macOS: `caffeinate -dis` while it runs, or
+  System Settings → prevent sleeping. The camera is re-acquired
+  automatically after wake or a USB hiccup (the app retries for ~2
+  minutes, then asks for a click).
+- If it was counting when the page closed, it **auto-resumes** on the next
+  visit — so an unattended machine that reboots into the browser recovers
+  by itself.
+
 ## Using a phone or another device as the camera
 
 Browsers only allow camera access on `localhost` or **HTTPS**. From another

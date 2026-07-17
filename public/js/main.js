@@ -543,6 +543,13 @@ function startDetectionLoop() {
   refs.video.requestVideoFrameCallback(onFrame);
 }
 
+// Hidden-tab backstop: rAF/rVFC stop when the tab is not visible, but the
+// camera keeps capturing. A coarse timer keeps counting at the browser's
+// throttled background rate (~1 tick/s) — reduced fidelity, not zero.
+setInterval(() => {
+  if (document.hidden && state.running) step(Date.now());
+}, 500);
+
 function updatePerfChip() {
   const now = performance.now();
   const seconds = (now - perf.windowStart) / 1000;
@@ -610,15 +617,41 @@ function sourceStarted() {
   setStatus(state.lines.length ? 'counting' : 'running — add a counting line');
 }
 
+let reconnectTimer = null;
+
+// Cameras drop after system sleep or a USB hiccup; track.stop() does NOT
+// fire 'ended', so this only reacts to genuine external loss.
+function scheduleCameraReconnect(attempt = 1) {
+  clearTimeout(reconnectTimer);
+  if (attempt > 40) {
+    setStatus('camera lost — click Start camera', false);
+    return;
+  }
+  setStatus(`camera lost — reconnecting (try ${attempt})…`, false);
+  reconnectTimer = setTimeout(async () => {
+    try {
+      await startCamera();
+    } catch {
+      scheduleCameraReconnect(attempt + 1);
+    }
+    if (!state.running) scheduleCameraReconnect(attempt + 1);
+  }, 3000);
+}
+
 async function startCamera() {
   try {
     setStatus('opening camera…');
-    await openCamera(refs.video, refs.cameraSelect.value || undefined);
+    const stream = await openCamera(refs.video, refs.cameraSelect.value || undefined);
     sourceStarted();
     state.cameraId = refs.cameraSelect.value;
     state.wasRunning = true; // so the next visit resumes counting automatically
     persistConfig();
     refreshCameraList(); // labels become available after permission
+    stream.getVideoTracks()[0]?.addEventListener('ended', () => {
+      if (!state.wasRunning) return;
+      state.running = false;
+      scheduleCameraReconnect();
+    });
   } catch (err) {
     setStatus('camera unavailable', false);
     refs.videoHint.hidden = false;
@@ -640,6 +673,7 @@ refs.fileInput.addEventListener('change', async () => {
 refs.stopBtn.addEventListener('click', () => {
   state.running = false;
   state.wasRunning = false;
+  clearTimeout(reconnectTimer);
   rvfcToken += 1; // end the frame-paced detection chain
   refs.perf.hidden = true;
   persistConfig();
