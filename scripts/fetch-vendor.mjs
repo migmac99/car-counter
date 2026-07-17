@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 /**
- * Downloads the ML runtime and detection model into public/vendor/ so the app
- * is fully self-hosted (and works offline as a PWA). Without these files the
- * frontend transparently falls back to loading them from CDN/Google storage.
+ * Downloads the ML runtimes and detection models into public/vendor/ so the
+ * app is fully self-hosted (and works offline as a PWA). Without these files
+ * the frontend falls back to CDN for the TF.js/COCO-SSD path; the YOLOX
+ * models are self-hosted only.
  *
- * Usage: bun run setup   (add --force to re-download)
+ * Usage: bun run setup            # TF.js + COCO-SSD + ONNX runtime + YOLOX nano/tiny
+ *        bun run setup --model s  # additionally fetch YOLOX-s (36 MB, most accurate)
+ *        add --force to re-download
  */
 import { mkdir, writeFile, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -12,10 +15,24 @@ import { dirname, join } from 'node:path';
 
 const VENDOR = join(dirname(dirname(fileURLToPath(import.meta.url))), 'public', 'vendor');
 const MODEL_BASE = 'https://storage.googleapis.com/tfjs-models/savedmodel/ssdlite_mobilenet_v2';
+const ORT_BASE = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist';
+const YOLOX_BASE = 'https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0';
 const FILES = [
   ['https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js', 'tf.min.js'],
   ['https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js', 'coco-ssd.min.js'],
+  // ONNX Runtime Web (WebGPU + WASM in one bundle) for the YOLOX backends
+  [`${ORT_BASE}/ort.min.js`, 'ort/ort.min.js'],
+  [`${ORT_BASE}/ort-wasm-simd-threaded.jsep.wasm`, 'ort/ort-wasm-simd-threaded.jsep.wasm'],
+  [`${ORT_BASE}/ort-wasm-simd-threaded.jsep.mjs`, 'ort/ort-wasm-simd-threaded.jsep.mjs'],
+  [`${ORT_BASE}/ort-wasm-simd-threaded.wasm`, 'ort/ort-wasm-simd-threaded.wasm'],
+  [`${ORT_BASE}/ort-wasm-simd-threaded.mjs`, 'ort/ort-wasm-simd-threaded.mjs'],
+  // YOLOX detection models (Apache-2.0, official release ONNX)
+  [`${YOLOX_BASE}/yolox_nano.onnx`, 'models/yolox_nano.onnx'],
+  [`${YOLOX_BASE}/yolox_tiny.onnx`, 'models/yolox_tiny.onnx'],
 ];
+if (process.argv.includes('--model') && process.argv[process.argv.indexOf('--model') + 1] === 's') {
+  FILES.push([`${YOLOX_BASE}/yolox_s.onnx`, 'models/yolox_s.onnx']);
+}
 const force = process.argv.includes('--force');
 
 async function exists(path) {

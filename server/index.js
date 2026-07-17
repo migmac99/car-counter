@@ -11,6 +11,10 @@ const MAX_BODY_BYTES = 512 * 1024;
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
+  // Cross-origin isolation enables multithreaded WASM for the ONNX backend's
+  // CPU fallback. CDN-fallback scripts are loaded with crossorigin=anonymous.
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'require-corp',
   'Content-Security-Policy': [
     "default-src 'self'",
     // 'unsafe-eval' is required by TensorFlow.js (it generates kernel code

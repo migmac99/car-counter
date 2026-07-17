@@ -3,7 +3,7 @@
      still works offline
    - /vendor/ (ML runtime + model, ~16 MB): cache-first → downloaded once */
 
-const VERSION = 'car-counter-v3';
+const VERSION = 'car-counter-v4';
 const SHELL_CACHE = `${VERSION}-shell`;
 const RUNTIME_CACHE = `${VERSION}-runtime`;
 
@@ -23,6 +23,7 @@ const SHELL = [
   '/js/stats-ui.js',
   '/js/api.js',
   '/js/speed.js',
+  '/js/yolox.js',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',

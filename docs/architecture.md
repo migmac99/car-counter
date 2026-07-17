@@ -66,8 +66,9 @@ unit-tested in Node directly.
 |---|---|
 | `main.js` | Orchestration: wiring, config persistence, zoom view, the rAF loop |
 | `camera.js` | getUserMedia / video-file sources |
-| `detector.js` | Loads TF.js + COCO-SSD (vendored → CDN fallback), frame detection |
-| `tracker.js` | Multi-object tracking (see [detection-and-tracking.md](detection-and-tracking.md)) |
+| `detector.js` | Backend-pluggable detection: YOLOX via ONNX Runtime Web (WebGPU/WASM) or TF.js COCO-SSD |
+| `yolox.js` | YOLOX pre/post-processing: letterbox, grid decode, NMS (pure, tested) |
+| `tracker.js` | ByteTrack-style tracking with motion prediction (see [detection-and-tracking.md](detection-and-tracking.md)) |
 | `counter.js` | Directional line-crossing detection (one instance per line) |
 | `geometry.js` | Shared 2D math (side-of-line, segment intersection, IoU, …) |
 | `overlay.js` | Crisp canvas rendering through the zoom transform: boxes, trails, lines + arrows, zones, handles, pulses |
@@ -113,6 +114,9 @@ crossings recorded offline upload when connectivity returns.
   TensorFlow.js generates kernel code with `new Function` — this is a known
   TF.js constraint, accepted here because the app is designed for
   localhost/LAN use.
+- **COOP/COEP** (cross-origin isolation) is enabled so the ONNX runtime's
+  WASM fallback can use threads; CDN-fallback scripts load with
+  `crossorigin="anonymous"` to satisfy it.
 - Static serving resolves paths against the public root and rejects
   traversal; API inputs are validated field-by-field (timestamp windows,
   direction whitelist, size caps); destructive deletion requires

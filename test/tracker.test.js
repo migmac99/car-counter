@@ -56,6 +56,35 @@ test('unseen tracks are dropped after maxAgeMs', () => {
   assert.equal(tracker.update([], 1500).length, 0, 'dropped after maxAge');
 });
 
+test('ByteTrack stage 2: weak detections sustain tracks but never create them', () => {
+  const tracker = new Tracker({ highThresh: 0.5, maxAgeMs: 1000 });
+  // A lone low-confidence detection must not open a track.
+  assert.equal(tracker.update([det(100, 100, 60, 40, 'car', 0.2)], 0).length, 0);
+
+  // Establish a confident track, then feed only weak detections.
+  tracker.update([det(100, 100, 60, 40, 'car', 0.9)], 0);
+  tracker.update([det(110, 100, 60, 40, 'car', 0.9)], 50);
+  const id = tracker.tracks[0].id;
+  for (let i = 2; i <= 12; i++) {
+    const tracks = tracker.update([det(100 + i * 10, 100, 60, 40, 'car', 0.2)], i * 50);
+    assert.equal(tracks.length, 1, 'weak detections keep the track alive');
+    assert.equal(tracks[0].id, id, 'same identity through the blur');
+  }
+  assert.ok(tracker.tracks[0].cx > 180, 'trajectory advanced on weak detections');
+});
+
+test('motion prediction bridges detection gaps for association', () => {
+  const tracker = new Tracker({ maxAgeMs: 2000 });
+  // Constant motion: +10px per 50ms => vx 0.2 px/ms
+  for (let i = 0; i < 6; i++) tracker.update([det(100 + i * 10, 100)], i * 50);
+  const id = tracker.tracks[0].id;
+  // 600ms gap (12 steps of motion = +120px): raw IoU with the stale box
+  // would fail for a 60px-wide box, but the predicted box tracks ahead.
+  const tracks = tracker.update([det(100 + 5 * 10 + 120, 100)], 250 + 600);
+  assert.equal(tracks.length, 1);
+  assert.equal(tracks[0].id, id);
+});
+
 test('track history records the smoothed path', () => {
   const tracker = new Tracker({ historyLen: 5 });
   for (let i = 0; i < 10; i++) tracker.update([det(i * 20, 100)], i * 50);

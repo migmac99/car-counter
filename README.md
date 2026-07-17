@@ -10,8 +10,12 @@ crossing events in SQLite and serves aggregated statistics.
 
 ## Features
 
-- **In-browser vehicle detection** (COCO-SSD, self-hosted model, CDN fallback)
-- **Multi-object tracking** with stable IDs and motion trails
+- **In-browser vehicle detection** with selectable models: YOLOX
+  nano/tiny/s on ONNX Runtime Web (**WebGPU**, threaded-WASM fallback) or
+  the lightweight TF.js COCO-SSD — all self-hosted
+- **ByteTrack-style multi-object tracking** with constant-velocity motion
+  prediction, stable IDs and motion trails — weak detections (blur,
+  partial occlusion) keep tracks alive but can't create ghosts
 - **Multiple directional counting lines** — two clicks each; every line counts
   both directions independently and events record which line fired
 - **Multiple detection zones** — polygons that restrict where detection looks
@@ -40,7 +44,7 @@ crossing events in SQLite and serves aggregated statistics.
 Requires Bun ≥ 1.1 (`curl -fsSL https://bun.sh/install | bash` or `brew install bun`).
 
 ```sh
-bun run setup   # one-time: download the ML runtime + model (~16 MB) for self-hosting
+bun run setup   # one-time: ML runtimes + models (~45 MB; add --model s for YOLOX-s)
 bun start       # serve on http://localhost:3000
 bun run dev     # same, with hot reload for development
 bun test        # run the unit + integration test suite

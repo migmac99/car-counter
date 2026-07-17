@@ -114,10 +114,16 @@ automatically** on the next visit.
 
 ### Settings
 
+- **Model**: YOLOX-tiny (default) is the accuracy/speed sweet spot and far
+  better than COCO-SSD on small, distant vehicles; YOLOX-s (fetch with
+  `bun run setup --model s`) is the most accurate; COCO-SSD remains as the
+  lightest option with a CDN fallback. Switching takes effect immediately.
 - **Min confidence** (0.15–0.8): raise it if shadows/bushes get counted,
   lower it if cars are missed. Default 0.5. Distant/blurry cameras often
   need 0.2–0.3 — pair a low threshold with a detection zone over the road
-  so foliage can't produce false counts.
+  so foliage can't produce false counts. (Below the threshold, weak
+  detections still help *keep tracking* already-confirmed vehicles — they
+  just can't start a new count.)
 - **Vehicle classes**: cars, trucks, buses, motorcycles.
 - **Count**: both directions, forward only, or reverse only — affects the
   displayed totals; both directions are always recorded.

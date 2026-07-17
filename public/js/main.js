@@ -1,5 +1,5 @@
 import { listCameras, openCamera, openFile, stopSource, cameraSettings } from './camera.js';
-import { Detector, VEHICLE_CLASSES } from './detector.js';
+import { Detector, VEHICLE_CLASSES, MODELS, availableModels } from './detector.js';
 import { Tracker } from './tracker.js';
 import { LineCounter } from './counter.js';
 import { Overlay } from './overlay.js';
@@ -46,6 +46,7 @@ const refs = {
   zoomValue: $('zoom-value'),
   minScore: $('min-score'),
   minScoreValue: $('min-score-value'),
+  modelSelect: $('model-select'),
   classFilters: $('class-filters'),
   countModeSel: $('count-mode'),
   presetSelect: $('preset-select'),
@@ -90,6 +91,7 @@ const state = {
   wasRunning: false, // camera was live when the page last closed
   historyView: null, // {bucket, rangeMs}
   speed: { gateA: '', gateB: '', meters: 0, limitKmh: 0 },
+  model: 'yolox-tiny',
 };
 
 const detector = new Detector();
@@ -214,6 +216,7 @@ function currentConfig() {
     wasRunning: state.wasRunning,
     historyView: state.historyView,
     speed: { ...state.speed },
+    model: state.model,
   };
 }
 
@@ -246,8 +249,11 @@ function applyConfig(config) {
   state.wasRunning = config.wasRunning ?? false;
   state.historyView = config.historyView ?? null;
   state.speed = { gateA: '', gateB: '', meters: 0, limitKmh: 0, ...config.speed };
+  state.model = MODELS[config.model] ? config.model : 'yolox-tiny';
   applySpeedConfig();
   refs.minScore.value = state.minScore;
+  refs.modelSelect.value = state.model;
+  tracker.highThresh = state.minScore;
   refs.minScoreValue.textContent = state.minScore.toFixed(2);
   refs.countModeSel.value = state.countMode;
   for (const box of refs.classFilters.querySelectorAll('input')) {
@@ -466,10 +472,7 @@ async function step(now) {
   try {
     const src = detectionSource();
     const t0 = performance.now();
-    const detected = await detector.detect(src.source, {
-      minScore: state.minScore,
-      classes: state.classes,
-    });
+    const detected = await detector.detect(src.source, { classes: state.classes });
     if (!detected) return;
     perf.detMs = perf.detMs * 0.9 + (performance.now() - t0) * 0.1;
     perf.detCount += 1;
@@ -680,7 +683,41 @@ refs.flipBtn.addEventListener('click', () => editor.flipTargetLine());
 refs.minScore.addEventListener('input', () => {
   state.minScore = Number(refs.minScore.value);
   refs.minScoreValue.textContent = state.minScore.toFixed(2);
+  tracker.highThresh = state.minScore; // ByteTrack stage-1 threshold
   persistConfig();
+});
+
+// --- detection model selection ---
+async function loadModel(name) {
+  try {
+    await detector.init(name, (text) => setStatus(text, false));
+    setStatus(state.running ? (state.lines.length ? 'counting' : 'running — add a counting line') : 'ready — start a camera');
+    return true;
+  } catch (err) {
+    console.error(err);
+    setStatus(`could not load ${MODELS[name]?.label ?? name}`, false);
+    return false;
+  }
+}
+
+async function populateModelSelect() {
+  const available = await availableModels();
+  refs.modelSelect.innerHTML = Object.entries(MODELS)
+    .map(([name, m]) => `<option value="${name}" ${available[name] ? '' : 'disabled'}>${m.label}${available[name] ? '' : ' — run setup'}</option>`)
+    .join('');
+  if (!available[state.model]) state.model = 'coco-ssd';
+  refs.modelSelect.value = state.model;
+}
+
+refs.modelSelect.addEventListener('change', async () => {
+  const previous = state.model;
+  state.model = refs.modelSelect.value;
+  persistConfig();
+  if (!(await loadModel(state.model))) {
+    state.model = previous;
+    refs.modelSelect.value = previous;
+    await loadModel(previous);
+  }
 });
 refs.classFilters.addEventListener('change', () => {
   state.classes = [...refs.classFilters.querySelectorAll('input:checked')].map((b) => b.value);
@@ -813,13 +850,16 @@ if ('serviceWorker' in navigator) {
   refreshCameraList();
   navigator.mediaDevices?.addEventListener?.('devicechange', refreshCameraList);
   requestAnimationFrame(frame);
-  try {
-    await detector.init((text) => setStatus(text, false));
-    setStatus('ready — start a camera', false);
+  await populateModelSelect();
+  let loaded = await loadModel(state.model);
+  if (!loaded && state.model !== 'coco-ssd') {
+    state.model = 'coco-ssd';
+    refs.modelSelect.value = 'coco-ssd';
+    loaded = await loadModel('coco-ssd');
+  }
+  if (loaded) {
     if (state.wasRunning) startCamera(); // resume counting where we left off
-  } catch (err) {
-    console.error(err);
-    setStatus('model failed to load', false);
+  } else {
     refs.videoHint.textContent =
       'The detection model could not be loaded. Run `bun run setup` on the server for offline use, or check your connection.';
   }

@@ -12,6 +12,8 @@ const MIME = {
   '.png': 'image/png',
   '.ico': 'image/x-icon',
   '.bin': 'application/octet-stream',
+  '.onnx': 'application/octet-stream',
+  '.wasm': 'application/wasm',
   '.map': 'application/json',
   '.woff2': 'font/woff2',
 };
