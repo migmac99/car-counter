@@ -16,11 +16,18 @@ export class SpeedMatcher {
   #crossings = new Map(); // trackId -> { [lineId]: ts }
 
   configure({ gateA, gateB, meters, limitKmh } = {}) {
-    this.#gateA = gateA || null;
-    this.#gateB = gateB || null;
-    this.#meters = Number(meters) || 0;
+    const nextA = gateA || null;
+    const nextB = gateB || null;
+    const nextMeters = Number(meters) || 0;
+    // Reconfiguring with identical gates must NOT clear pending half-pairs —
+    // callers may re-apply config periodically while a vehicle is between
+    // the gates. (A limit change alone doesn't invalidate timing either.)
+    const changed = nextA !== this.#gateA || nextB !== this.#gateB || nextMeters !== this.#meters;
+    this.#gateA = nextA;
+    this.#gateB = nextB;
+    this.#meters = nextMeters;
     this.#limitKmh = Number(limitKmh) || 0;
-    this.#crossings.clear();
+    if (changed) this.#crossings.clear();
   }
 
   get active() {

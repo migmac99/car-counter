@@ -37,7 +37,11 @@ crossing events in SQLite and serves aggregated statistics.
 - **History** — minute/hour/day buckets with charts and a table view
 - **Installable PWA** that keeps working offline and self-updates when online
 - **Video-file mode** — analyze recorded footage instead of a live camera
-- **Zero npm dependencies** — [Bun](https://bun.sh) built-ins only (`Bun.serve`, `bun:sqlite`)
+- **Headless worker** — `bun run worker` counts **without a browser**
+  (ffmpeg capture + CoreML/CPU inference), sharing the same config and
+  feeding the same dashboard
+- **Zero npm dependencies** in the app — [Bun](https://bun.sh) built-ins only
+  (`Bun.serve`, `bun:sqlite`); the optional worker has its own isolated deps
 
 ## Quickstart
 

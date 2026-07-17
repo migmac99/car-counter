@@ -130,3 +130,14 @@ crossings recorded offline upload when connectivity returns.
 Video frames never leave the browser. The server stores only numeric crossing
 events. There is no tracking, no third-party requests after `bun run setup`
 (with vendored model), and the whole system runs air-gapped.
+
+## Headless worker (`worker/`)
+
+The optional worker realizes the "any process can produce events" design:
+ffmpeg captures frames (AVFoundation webcam or a video file), YOLOX runs on
+`onnxruntime-node` (CoreML on Apple silicon → CPU fallback), and the **same
+pure modules the browser uses** — `tracker.js`, `counter.js`, `speed.js`,
+`yolox.js` decode — do the counting. It reads the shared config from
+`GET /api/config` (including the zoom view crop) and posts events with
+`source: "headless"`. The worker keeps its dependencies in its own
+`worker/package.json`, so the app itself stays zero-dependency.

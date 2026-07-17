@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "bun --hot server/index.js",
     "start": "bun server/index.js",
+    "worker": "bun install --cwd worker --silent && bun worker/index.js",
     "setup": "bun scripts/fetch-vendor.mjs",
     "icons": "bun scripts/generate-icons.mjs",
     "test": "bun test"

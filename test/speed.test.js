@@ -48,6 +48,20 @@ test('inactive without both gates and a distance', () => {
   assert.equal(m.active, true);
 });
 
+test('re-applying an identical config keeps pending half-pairs', () => {
+  const m = configured();
+  m.observe(1, 'la', 10_000);
+  m.configure({ gateA: 'la', gateB: 'lb', meters: 26, limitKmh: 50 }); // periodic re-apply
+  assert.equal(m.observe(1, 'lb', 12_000).kmh, 46.8, 'measurement survives reconfigure');
+});
+
+test('changing gates clears pending half-pairs', () => {
+  const m = configured();
+  m.observe(1, 'la', 10_000);
+  m.configure({ gateA: 'la', gateB: 'lc', meters: 26 });
+  assert.equal(m.observe(1, 'lc', 12_000), null, 'stale gate-A timestamp discarded');
+});
+
 test('prune drops half-completed measurements for dead tracks', () => {
   const m = configured();
   m.observe(7, 'la', 1_000);

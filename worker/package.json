@@ -1,0 +1,9 @@
+{
+  "name": "car-counter-worker",
+  "private": true,
+  "description": "Headless capture + detection worker: counts without a browser. Optional component — the main app stays zero-dependency.",
+  "type": "module",
+  "dependencies": {
+    "onnxruntime-node": "^1.22.0"
+  }
+}

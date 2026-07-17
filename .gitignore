@@ -11,6 +11,7 @@ public/vendor/
 .DS_Store
 *.log
 node_modules/
+worker/bun.lock
 
 # graphify knowledge graph — derived, rebuild with graphify.watch
 graphify-out/
