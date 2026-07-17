@@ -16,16 +16,20 @@
     <h1>Car Counter</h1>
     <span id="status" class="status-chip">starting…</span>
     <span class="spacer"></span>
+    <button id="reload-btn" title="Check for updates and reload the app">↻ Reload</button>
     <button id="install-btn" hidden>Install app</button>
   </header>
 
   <main>
     <section class="panel video-panel">
       <div class="video-wrap" id="video-wrap">
-        <video id="video" playsinline muted></video>
+        <div class="video-stage" id="video-stage">
+          <video id="video" playsinline muted></video>
+        </div>
         <canvas id="overlay"></canvas>
         <div id="video-hint" class="video-hint">
-          Start a camera or open a video file, then draw a counting line across the road.
+          Start a camera or open a video file, then add counting lines across the road.
+          Click a line or zone to select it; drag to move, drag its handles to reshape.
         </div>
       </div>
 
@@ -39,10 +43,15 @@
         </label>
         <button id="stop-btn" disabled>Stop</button>
         <span class="spacer"></span>
-        <button id="draw-line-btn" title="Click two points across the road">Set counting line</button>
-        <button id="flip-btn" title="Swap which crossing direction is 'forward'">Flip direction</button>
-        <button id="draw-roi-btn" title="Click points around the area to watch; double-click to close">Draw zone</button>
-        <button id="clear-roi-btn">Clear zone</button>
+        <button id="draw-line-btn" title="Click two points across the road; each line counts separately">Add line</button>
+        <button id="draw-roi-btn" title="Click points around an area to watch; double-click to close. Detections outside all zones are ignored">Add zone</button>
+        <button id="flip-btn" title="Swap which crossing direction of the selected line is 'forward'">Flip direction</button>
+        <button id="delete-shape-btn" disabled title="Remove the selected line or zone (or press Delete)">Remove selected</button>
+        <label class="zoom-ctl" title="Digital zoom — detection runs on the zoomed region; drag the video to pan">
+          Zoom
+          <input id="zoom" type="range" min="1" max="10" step="0.25" value="1" />
+          <span id="zoom-value">1×</span>
+        </label>
       </div>
 
       <details class="settings">
@@ -65,6 +74,21 @@
               <option value="rev">reverse only</option>
             </select>
           </label>
+          <div class="group">
+            <label>Preset
+              <select id="preset-select">
+                <option value="">—</option>
+              </select>
+            </label>
+            <button id="preset-save" title="Save the current lines, zones, zoom and settings under a name on the server">Save preset…</button>
+            <button id="preset-delete">Delete preset</button>
+          </div>
+          <div class="group">
+            <button id="export-config" title="Download the current setup as a JSON file">Export config</button>
+            <label class="file-btn">Import config…
+              <input id="import-config" type="file" accept="application/json,.json" hidden />
+            </label>
+          </div>
           <button id="reset-data" class="danger">Delete all history…</button>
         </div>
       </details>

@@ -64,21 +64,25 @@ unit-tested in Node directly.
 
 | Module | Responsibility |
 |---|---|
-| `main.js` | Orchestration: wiring, config persistence, the rAF loop |
+| `main.js` | Orchestration: wiring, config persistence, zoom view, the rAF loop |
 | `camera.js` | getUserMedia / video-file sources |
 | `detector.js` | Loads TF.js + COCO-SSD (vendored → CDN fallback), frame detection |
 | `tracker.js` | Multi-object tracking (see [detection-and-tracking.md](detection-and-tracking.md)) |
-| `counter.js` | Directional line-crossing detection |
+| `counter.js` | Directional line-crossing detection (one instance per line) |
 | `geometry.js` | Shared 2D math (side-of-line, segment intersection, IoU, …) |
-| `overlay.js` | Canvas rendering: boxes, trails, line + arrow, zone, count pulses |
-| `zones.js` | Click-to-draw editor for the line and the detection zone |
-| `api.js` | Server client + localStorage-backed offline event queue |
+| `overlay.js` | Crisp canvas rendering through the zoom transform: boxes, trails, lines + arrows, zones, handles, pulses |
+| `zones.js` | `ShapeEditor` — draw/select/move/reshape/delete lines & zones, pan while zoomed |
+| `api.js` | Server client, presets, offline event queue (localStorage) |
 | `stats-ui.js` | Live tiles, polling, history controls |
 | `charts.js` | Dependency-free SVG charts (stacked bars, sparkline, table) |
 
-The counting line and zone are stored **normalized (0..1)** relative to the
-video frame, so they survive resolution changes; all pipeline math runs in
-video pixel space.
+Shapes (any number of counting lines and zones) are stored **normalized
+(0..1)** relative to the video frame, so they survive resolution changes; all
+pipeline math runs in full-frame video pixel space. The digital zoom is a CSS
+transform on the video plus a matching canvas transform on the overlay —
+and the detector receives the **visible crop only**, so zooming raises the
+effective resolution the model sees. Each line owns a `LineCounter`; events
+carry the line's id.
 
 ### Configuration flow
 

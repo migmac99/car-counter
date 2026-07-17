@@ -36,32 +36,33 @@ function labelFormatter(bucket, rangeMs) {
 
 /**
  * Owns the live tiles, sparkline and history chart. `countMode()` supplies the
- * user's direction filter ('both' | 'fwd' | 'rev') applied to displayed values.
+ * user's direction filter ('both' | 'fwd' | 'rev') applied to displayed
+ * values. Options: `initial` restores a saved {bucket, rangeMs} view;
+ * `onViewChange(bucket, rangeMs)` fires when the user changes it.
  */
 export class StatsUi {
   #bucket = 'minute';
   #rangeMs = RANGES.minute[0][1];
   #lastHistory = null;
 
-  constructor(refs, countMode) {
+  constructor(refs, countMode, { initial, onViewChange } = {}) {
     this.refs = refs;
     this.countMode = countMode;
+    this.onViewChange = onViewChange;
 
     refs.bucketSeg.addEventListener('click', (e) => {
       const btn = e.target.closest('button[data-bucket]');
       if (!btn) return;
-      this.#bucket = btn.dataset.bucket;
-      for (const b of refs.bucketSeg.querySelectorAll('button')) {
-        b.classList.toggle('active', b === btn);
-      }
-      this.#fillRangeOptions();
-      this.refreshHistory();
+      this.setView(btn.dataset.bucket);
+      this.onViewChange?.(this.#bucket, this.#rangeMs);
     });
     refs.rangeSelect.addEventListener('change', () => {
       this.#rangeMs = Number(refs.rangeSelect.value);
       this.refreshHistory();
+      this.onViewChange?.(this.#bucket, this.#rangeMs);
     });
     this.#fillRangeOptions();
+    if (initial) this.setView(initial.bucket, initial.rangeMs);
 
     new ResizeObserver(() => this.#rerenderHistory()).observe(refs.historyChart);
 
@@ -76,6 +77,21 @@ export class StatsUi {
       .map(([label, ms]) => `<option value="${ms}">${label}</option>`)
       .join('');
     this.#rangeMs = RANGES[this.#bucket][0][1];
+  }
+
+  /** Switch the history view (bucket and optionally range) programmatically. */
+  setView(bucket, rangeMs) {
+    if (!RANGES[bucket]) return;
+    this.#bucket = bucket;
+    for (const b of this.refs.bucketSeg.querySelectorAll('button')) {
+      b.classList.toggle('active', b.dataset.bucket === bucket);
+    }
+    this.#fillRangeOptions();
+    if (rangeMs && RANGES[bucket].some(([, ms]) => ms === rangeMs)) {
+      this.#rangeMs = rangeMs;
+      this.refs.rangeSelect.value = String(rangeMs);
+    }
+    this.refreshHistory();
   }
 
   /** Instant feedback for a local crossing before the next server poll. */

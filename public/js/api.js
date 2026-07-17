@@ -101,3 +101,21 @@ export function saveConfig(config) {
 
 export const resetHistory = () =>
   fetch('/api/events?confirm=yes', { method: 'DELETE' }).then((r) => r.json());
+
+// --- named config presets ---
+
+export const fetchPresets = () => getJson('/api/presets');
+
+export const fetchPreset = (name) => getJson(`/api/preset?name=${encodeURIComponent(name)}`);
+
+export async function savePreset(name, config) {
+  const res = await fetch(`/api/preset?name=${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  if (!res.ok) throw new Error((await res.json()).error ?? 'save failed');
+}
+
+export const deletePreset = (name) =>
+  fetch(`/api/preset?name=${encodeURIComponent(name)}`, { method: 'DELETE' });

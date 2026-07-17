@@ -24,20 +24,50 @@ online, but the PWA then needs connectivity on first use.
 1. **Start camera** (or **Open video…** to analyze a recorded clip — clips
    loop automatically). Pick a specific camera from the dropdown if you have
    several; the list gets labels after the first permission grant.
-2. **Set counting line**, then click two points across the road. Cars are
-   counted the moment their tracked center crosses this line.
+2. **Add line**, then click two points across the road. Cars are counted the
+   moment their tracked center crosses a line. Add as many lines as you need
+   (one per lane or per approach) — each counts independently, and every
+   recorded event remembers which line fired.
    - The small arrow shows which crossing direction is **forward**;
-     **Flip direction** reverses it.
-   - Draw the line perpendicular to traffic, roughly mid-frame.
-3. Optional — **Draw zone**: click vertices around the area to watch
+     **Flip direction** reverses the selected line.
+   - Draw lines perpendicular to traffic, roughly mid-frame.
+3. Optional — **Add zone**: click vertices around an area to watch
    (double-click or Enter to close, Escape to cancel). Detections outside
-   the zone are ignored — useful to exclude parked cars or a second road.
-   **Clear zone** removes it.
+   all zones are ignored — useful to exclude parked cars or a second road.
 4. Watch the overlay: white boxes are tracked vehicles with IDs, blue trails
    show their paths, and a pulse marks each count.
 
-Everything you configure (line, zone, settings) is saved on the server
-automatically and restored on every load — on any device on your network.
+### Editing shapes
+
+Click any line or zone to select it (it highlights and shows handles):
+
+- **Move** — drag the shape's body.
+- **Reshape / rotate / scale** — drag a line endpoint or zone vertex.
+- **Remove** — press Delete/Backspace or the **Remove selected** button.
+- **Escape** deselects (or cancels an in-progress drawing).
+
+### Zoom
+
+The **Zoom** slider (1–10×) magnifies the view; drag the video to pan while
+zoomed. This is not just cosmetic: **the detector sees exactly what you see**
+— the zoomed crop is what gets analyzed — so zooming into a distant road
+materially improves detection of far-away vehicles. Lines and zones stay
+anchored to the road (full-frame coordinates) while the overlay stays crisp
+at any zoom. For deep zooming, cameras are asked for 1080p.
+
+### Presets and config files
+
+Everything you configure (lines, zones, zoom, settings) is saved on the
+server automatically and restored on every load — on any device on your
+network. If the camera was running when you left, counting **resumes
+automatically** on the next visit.
+
+- **Save preset…** (in Settings) stores the current setup under a name on
+  the server; pick it from the **Preset** dropdown to load it later —
+  useful for multiple camera positions.
+- **Export config** downloads the same setup as a JSON file;
+  **Import config…** loads one — handy for backups or moving to another
+  server.
 
 ### Settings
 
@@ -67,6 +97,11 @@ Click **Install app** in the header (or the browser's install icon in the
 address bar). The installed app works offline: interface and model load from
 cache, and crossings counted while the server is unreachable are queued in
 the browser and uploaded automatically when it's back.
+
+**Updates are automatic.** The app fetches the latest code from your server
+on every online launch, checks hourly while it stays open, and reloads onto
+new versions when they arrive — installed or not. The **↻ Reload** button in
+the header forces a check right now.
 
 ## Using a phone or another device as the camera
 

@@ -25,6 +25,7 @@ request, body limit 512 KB).
       "class": "car",             // optional — detector class (≤ 32 chars)
       "confidence": 0.91,         // optional — 0..1
       "trackId": 17,              // optional — integer, for debugging
+      "line": "line-3f9a2b",      // optional — id of the counting line that fired (≤ 64 chars)
       "source": "default"         // optional — camera/site label (≤ 64 chars)
     }
   ]
@@ -86,16 +87,34 @@ stores:
 
 ```json
 {
-  "line": { "a": { "x": 0.08, "y": 0.55 }, "b": { "x": 0.92, "y": 0.55 } },
-  "roi":  [ { "x": 0.1, "y": 0.2 }, "…" ],
+  "lines": [ { "id": "line-3f9a2b", "a": { "x": 0.4, "y": 0.2 }, "b": { "x": 0.4, "y": 0.8 } } ],
+  "zones": [ { "id": "zone-91c0d4", "points": [ { "x": 0.25, "y": 0.25 }, "…" ] } ],
   "minScore": 0.5,
   "classes": ["car", "truck", "bus", "motorcycle"],
-  "countMode": "both"
+  "countMode": "both",
+  "view": { "z": 2, "cx": 0.5, "cy": 0.5 },
+  "cameraId": "…",
+  "wasRunning": true,
+  "historyView": { "bucket": "minute", "rangeMs": 1800000 }
 }
 ```
 
 Coordinates are normalized (0..1) relative to the video frame. `GET` returns
-`{}` when nothing is stored; `PUT` responds `{ "ok": true }`.
+`{}` when nothing is stored; `PUT` responds `{ "ok": true }`. (Older
+single-`line`/`roi` configs are still understood by the frontend.)
+
+## Presets
+
+Named copies of the config object, stored server-side:
+
+| Endpoint | Effect |
+|---|---|
+| `GET /api/presets` | `{ "presets": [ { "name": "Front Window", "updatedAt": 1784… } ] }` |
+| `GET /api/preset?name=X` | The stored config object (404 if absent) |
+| `PUT /api/preset?name=X` | Save body (JSON object, ≤ 32 KB) under the name |
+| `DELETE /api/preset?name=X` | Remove the preset |
+
+Names: 1–40 characters — letters, digits, spaces, `-`, `_`.
 
 ## `DELETE /api/events?confirm=yes`
 

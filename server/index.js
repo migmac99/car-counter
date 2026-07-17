@@ -88,14 +88,22 @@ export function startServer({
 }
 
 if (import.meta.main) {
-  const { server, store } = startServer();
+  // Under `bun --hot` this module re-evaluates on every save; Bun.serve reuses
+  // the listening socket and swaps the fetch handler in place. Close the
+  // previous run's DB connection and register signal handlers only once.
+  globalThis.__carCounter?.store.close();
+  globalThis.__carCounter = startServer();
+  const { server } = globalThis.__carCounter;
   console.log(`car-counter listening on http://localhost:${server.port} (bound to ${server.hostname})`);
   console.log('Note: camera access from other devices requires HTTPS — see docs/user-guide.md');
-  for (const signal of ['SIGINT', 'SIGTERM']) {
-    process.on(signal, () => {
-      server.stop();
-      store.close();
-      process.exit(0);
-    });
+  if (!globalThis.__carCounterSignals) {
+    globalThis.__carCounterSignals = true;
+    for (const signal of ['SIGINT', 'SIGTERM']) {
+      process.on(signal, () => {
+        globalThis.__carCounter.server.stop();
+        globalThis.__carCounter.store.close();
+        process.exit(0);
+      });
+    }
   }
 }

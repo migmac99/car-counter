@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS events (
   class       TEXT    NOT NULL DEFAULT 'car',
   confidence  REAL,
   track_id    INTEGER,
+  line        TEXT,
   source      TEXT    NOT NULL DEFAULT 'default',
   received_at INTEGER NOT NULL
 );
@@ -63,10 +64,13 @@ export class Store {
     this.db = new Database(file);
     this.db.exec('PRAGMA journal_mode = WAL;');
     this.db.exec(SCHEMA);
+    // Databases created before multi-line support lack the line column.
+    const columns = this.db.prepare(`PRAGMA table_info(events)`).all().map((c) => c.name);
+    if (!columns.includes('line')) this.db.exec(`ALTER TABLE events ADD COLUMN line TEXT`);
     this.stmts = {
       insert: this.db.prepare(
-        `INSERT INTO events (ts, direction, class, confidence, track_id, source, received_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO events (ts, direction, class, confidence, track_id, line, source, received_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       ),
       countSince: this.db.prepare(
         `SELECT direction, COUNT(*) AS n FROM events WHERE ts >= ? GROUP BY direction`
@@ -88,6 +92,10 @@ export class Store {
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
       ),
       clearEvents: this.db.prepare(`DELETE FROM events`),
+      listPresets: this.db.prepare(
+        `SELECT key, updated_at FROM config WHERE key LIKE 'preset:%' ORDER BY key`
+      ),
+      deleteConfig: this.db.prepare(`DELETE FROM config WHERE key = ?`),
     };
   }
 
@@ -101,6 +109,7 @@ export class Store {
           e.class ?? 'car',
           e.confidence ?? null,
           e.trackId ?? null,
+          e.line ?? null,
           e.source ?? 'default',
           receivedAt
         );
@@ -178,6 +187,16 @@ export class Store {
 
   setConfig(key, value) {
     this.stmts.setConfig.run(key, JSON.stringify(value), Date.now());
+  }
+
+  deleteConfig(key) {
+    this.stmts.deleteConfig.run(key);
+  }
+
+  listPresets() {
+    return this.stmts.listPresets
+      .all()
+      .map((r) => ({ name: r.key.slice('preset:'.length), updatedAt: r.updated_at }));
   }
 
   clearEvents() {

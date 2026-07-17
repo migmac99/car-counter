@@ -42,10 +42,15 @@ data/             SQLite database — gitignored, created on first run
 
 ```sh
 bun start        # run the server (PORT, HOST env vars)
-bun test         # 39 tests across 5 files, ~40 ms
+bun run dev      # same with hot reload (bun --hot): edit server files, keep the socket
+bun test         # 43 tests across 5 files, ~45 ms
 bun run setup    # fetch ML vendor files (idempotent; --force to re-fetch)
 bun run icons    # regenerate public/icons/*.png after changing the art
 ```
+
+Hot reload notes: `Bun.serve` swaps the fetch handler in place on save (the
+listening socket survives); the entry block closes the previous SQLite
+connection and registers signal handlers only once via a `globalThis` guard.
 
 ## Testing
 
@@ -66,7 +71,7 @@ For end-to-end verification of the CV pipeline, feed a video file through
 regression test (detection quality itself depends on viewpoint; see
 [detection-and-tracking.md](detection-and-tracking.md)).
 
-## Caching — read before shipping frontend changes
+## Caching & auto-update — read before shipping frontend changes
 
 The service worker uses **network-first for the app shell**, so ordinary code
 changes reach clients on the next load with no ceremony. Still bump `VERSION`
@@ -74,6 +79,12 @@ in `public/sw.js` when you change the shell file list or the caching logic
 itself — activation of the new worker is what clears old caches. The
 `/vendor/` files are cached forever by path; if you ever change model
 versions, change the vendor paths (or the SW version).
+
+Clients keep themselves current even when installed or left open: the page
+registers the SW with `updateViaCache: 'none'`, calls `registration.update()`
+hourly, and reloads once when a new worker takes control
+(`controllerchange`). The header's ↻ Reload button triggers the same check on
+demand.
 
 Server-side, app code is served with `Cache-Control: no-cache` + ETag
 (revalidation is a cheap 304), vendor/icons with `max-age=86400`.

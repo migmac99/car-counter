@@ -12,12 +12,19 @@ crossing events in SQLite and serves aggregated statistics.
 
 - **In-browser vehicle detection** (COCO-SSD, self-hosted model, CDN fallback)
 - **Multi-object tracking** with stable IDs and motion trails
-- **Directional counting line** — draw it with two clicks, flip its direction;
-  crossings are counted separately per direction
-- **Optional detection zone** — restrict counting to a polygon you draw
+- **Multiple directional counting lines** — two clicks each; every line counts
+  both directions independently and events record which line fired
+- **Multiple detection zones** — polygons that restrict where detection looks
+- **Full shape editing** — click to select, drag to move, drag handles to
+  reshape/rotate, Delete to remove, flip a line's direction
+- **Digital zoom up to 10×** with drag-to-pan — detection runs on the zoomed
+  crop, so zooming genuinely improves recall on distant traffic
+- **Named presets** (stored server-side) plus config **export/import** as JSON
+- **Session restore** — lines, zones, zoom, camera and view come back on
+  reload; if it was counting, it resumes automatically
 - **Live stats** — cars/min (last 60 s), 5-minute average, last hour, today, all-time
 - **History** — minute/hour/day buckets with charts and a table view
-- **Installable PWA** that keeps working offline (model included)
+- **Installable PWA** that keeps working offline and self-updates when online
 - **Video-file mode** — analyze recorded footage instead of a live camera
 - **Zero npm dependencies** — [Bun](https://bun.sh) built-ins only (`Bun.serve`, `bun:sqlite`)
 
@@ -28,11 +35,12 @@ Requires Bun ≥ 1.1 (`curl -fsSL https://bun.sh/install | bash` or `brew instal
 ```sh
 bun run setup   # one-time: download the ML runtime + model (~16 MB) for self-hosting
 bun start       # serve on http://localhost:3000
+bun run dev     # same, with hot reload for development
 bun test        # run the unit + integration test suite
 ```
 
-Open <http://localhost:3000>, click **Start camera**, then **Set counting line**
-and click two points across the road. The arrow shows which crossing direction
+Open <http://localhost:3000>, click **Start camera**, then **Add line** and
+click two points across the road. The arrow shows which crossing direction
 counts as *forward*. That's it — counts persist across restarts.
 
 `PORT` and `HOST` environment variables override the defaults. Skipping

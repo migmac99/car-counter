@@ -20,6 +20,7 @@ function validateEvent(e, now) {
   if (e.class != null && (typeof e.class !== 'string' || e.class.length > 32)) return 'invalid class';
   if (e.confidence != null && !(e.confidence >= 0 && e.confidence <= 1)) return 'invalid confidence';
   if (e.trackId != null && !Number.isInteger(e.trackId)) return 'invalid trackId';
+  if (e.line != null && (typeof e.line !== 'string' || e.line.length > 64)) return 'invalid line';
   if (e.source != null && (typeof e.source !== 'string' || e.source.length > 64)) return 'invalid source';
   return null;
 }
@@ -74,4 +75,35 @@ export const routes = {
     store.clearEvents();
     return { ok: true };
   },
+
+  'GET /api/presets': (store) => ({ presets: store.listPresets() }),
+
+  'GET /api/preset': (store, { query }) => {
+    const config = store.getConfig(presetKey(query));
+    if (!config) throw new ApiError(404, 'no such preset');
+    return config;
+  },
+
+  'PUT /api/preset': (store, { query, body, rawBody }) => {
+    const key = presetKey(query);
+    if (typeof body !== 'object' || body === null || Array.isArray(body))
+      throw new ApiError(400, 'preset must be a JSON object');
+    if (rawBody.length > MAX_CONFIG_BYTES) throw new ApiError(413, 'preset too large');
+    store.setConfig(key, body);
+    return { ok: true };
+  },
+
+  'DELETE /api/preset': (store, { query }) => {
+    store.deleteConfig(presetKey(query));
+    return { ok: true };
+  },
 };
+
+const PRESET_NAME = /^\w[\w\- ]{0,39}$/;
+
+function presetKey(query) {
+  const name = query.get('name');
+  if (!name || !PRESET_NAME.test(name))
+    throw new ApiError(400, 'name must be 1-40 chars: letters, digits, spaces, - or _');
+  return `preset:${name}`;
+}

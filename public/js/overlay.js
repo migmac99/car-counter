@@ -1,13 +1,14 @@
 import { positiveNormal } from './geometry.js';
 
 const LINE_COLOR = '#38bdf8';
+const SELECTED_COLOR = '#fbbf24';
 const ROI_COLOR = '#fbbf24';
 const TRACK_COLOR = 'rgba(248, 250, 252, 0.9)';
 const TRAIL_COLOR = 'rgba(56, 189, 248, 0.6)';
 const PULSE_MS = 700;
 
 /**
- * Draws detections, trails, the counting line/zone and count pulses onto the
+ * Draws detections, trails, counting lines, zones and count pulses onto the
  * canvas stacked over the video. All inputs are in video pixel space; the
  * canvas is kept at the video's intrinsic resolution.
  */
@@ -19,10 +20,14 @@ export class Overlay {
     this.ctx = canvas.getContext('2d');
   }
 
-  resize(width, height) {
-    if (width && (this.canvas.width !== width || this.canvas.height !== height)) {
-      this.canvas.width = width;
-      this.canvas.height = height;
+  /** Match the backing store to the displayed size so strokes are pixel-crisp. */
+  resize() {
+    const dpr = devicePixelRatio || 1;
+    const w = Math.round(this.canvas.clientWidth * dpr);
+    const h = Math.round(this.canvas.clientHeight * dpr);
+    if (w && (this.canvas.width !== w || this.canvas.height !== h)) {
+      this.canvas.width = w;
+      this.canvas.height = h;
     }
   }
 
@@ -32,50 +37,83 @@ export class Overlay {
 
   /**
    * @param {object} s scene state:
-   *   { tracks, line, roi, editing: {mode, points, cursor}, showBoxes }
+   *   { tracks, lines: [{id,a,b}], zones: [{id,points}], selection,
+   *     editing: {mode, points, cursor}, view: {z, visX, visY}, showBoxes }
+   *
+   * The canvas itself is never CSS-zoomed (that would blur it); instead the
+   * zoom view is applied here as a canvas transform, so lines, boxes and
+   * labels re-rasterize crisply at any zoom while inputs stay in full-frame
+   * video coordinates.
    */
   draw(s) {
     const { ctx, canvas } = this;
-    const scale = Math.max(1, canvas.width / 1280); // keep stroke widths legible
+    const view = s.view ?? { z: 1, visX: 0, visY: 0, vw: 0, vh: 0 };
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!view.vw) return;
+    // Letterbox the video's aspect into the canvas, then apply the zoom view:
+    // one transform maps video coordinates to crisp device pixels.
+    const s0 = Math.min(canvas.width / view.vw, canvas.height / view.vh);
+    const ox = (canvas.width - view.vw * s0) / 2;
+    const oy = (canvas.height - view.vh * s0) / 2;
+    const k = view.z * s0;
+    ctx.setTransform(k, 0, 0, k, ox - view.visX * k, oy - view.visY * k);
+    // `scale` converts our CSS-px design sizes into pre-transform units so
+    // strokes and labels render at constant screen size at any zoom.
+    const scale = (devicePixelRatio || 1) / k;
 
-    if (s.roi?.length >= 3) this.#drawRoi(s.roi, scale);
-    if (s.editing?.mode === 'roi') this.#drawPending(s.editing, ROI_COLOR, scale, true);
-    if (s.line) this.#drawLine(s.line, scale);
+    const isSelected = (kind, id) => s.selection?.kind === kind && s.selection?.id === id;
+    for (const zone of s.zones ?? []) this.#drawZone(zone, isSelected('zone', zone.id), scale);
+    if (s.editing?.mode === 'zone') this.#drawPending(s.editing, ROI_COLOR, scale, true);
+    (s.lines ?? []).forEach((line, i) =>
+      this.#drawLine(line, i, isSelected('line', line.id), scale)
+    );
     if (s.editing?.mode === 'line') this.#drawPending(s.editing, LINE_COLOR, scale, false);
     if (s.showBoxes !== false) for (const t of s.tracks ?? []) this.#drawTrack(t, scale);
     this.#drawPulses(scale);
   }
 
-  #drawRoi(roi, scale) {
+  #handle(p, color, scale) {
     const { ctx } = this;
     ctx.beginPath();
-    roi.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+    ctx.arc(p.x, p.y, 5.5 * scale, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.lineWidth = 1.5 * scale;
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.stroke();
+  }
+
+  #drawZone(zone, selected, scale) {
+    const { ctx } = this;
+    const pts = zone.points;
+    if (pts.length < 3) return;
+    ctx.beginPath();
+    pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
     ctx.closePath();
     ctx.fillStyle = 'rgba(251, 191, 36, 0.08)';
     ctx.fill();
     ctx.strokeStyle = ROI_COLOR;
-    ctx.lineWidth = 1.5 * scale;
-    ctx.setLineDash([8 * scale, 6 * scale]);
+    ctx.lineWidth = (selected ? 2.5 : 1.5) * scale;
+    ctx.setLineDash(selected ? [] : [8 * scale, 6 * scale]);
     ctx.stroke();
     ctx.setLineDash([]);
+    if (selected) for (const p of pts) this.#handle(p, ROI_COLOR, scale);
   }
 
-  #drawLine(line, scale) {
+  #drawLine(line, index, selected, scale) {
     const { ctx } = this;
     const { a, b } = line;
-    ctx.strokeStyle = LINE_COLOR;
-    ctx.fillStyle = LINE_COLOR;
-    ctx.lineWidth = 3 * scale;
+    const color = selected ? SELECTED_COLOR : LINE_COLOR;
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = (selected ? 4 : 3) * scale;
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
     ctx.stroke();
-    for (const p of [a, b]) {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 5 * scale, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    for (const p of [a, b]) this.#handle(p, color, scale);
+
     // Direction arrow at the midpoint, pointing to the 'forward' side.
     const n = positiveNormal(a, b);
     const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
@@ -94,7 +132,7 @@ export class Overlay {
     ctx.lineTo(tip.x - head * Math.cos(ang + 0.45), tip.y - head * Math.sin(ang + 0.45));
     ctx.closePath();
     ctx.fill();
-    this.#label('forward', tip.x, tip.y - 10 * scale, LINE_COLOR, scale);
+    this.#label(`L${index + 1} forward`, tip.x, tip.y - 10 * scale, color, scale);
   }
 
   #drawPending(editing, color, scale, closeable) {

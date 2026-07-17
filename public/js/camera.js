@@ -13,8 +13,9 @@ export async function openCamera(video, deviceId) {
   const constraints = {
     audio: false,
     video: {
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
+      // Ask for 1080p so digital zoom still has real pixels to crop into.
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
       ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'environment' }),
     },
   };

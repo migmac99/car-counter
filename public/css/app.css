@@ -116,6 +116,11 @@ main {
   overflow: hidden;
   aspect-ratio: 16 / 9;
 }
+.video-stage {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
 .video-wrap video,
 .video-wrap canvas {
   position: absolute;
@@ -125,6 +130,7 @@ main {
   object-fit: contain;
 }
 .video-wrap canvas { cursor: default; }
+.video-wrap.zoomed canvas { cursor: grab; }
 .video-wrap.editing canvas { cursor: crosshair; }
 .video-hint {
   position: absolute;
@@ -176,6 +182,20 @@ button.active {
 }
 button.danger { color: var(--danger); }
 .file-btn { display: inline-block; }
+
+.zoom-ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--ink-2);
+}
+.zoom-ctl input { width: 110px; }
+#zoom-value {
+  min-width: 2.6em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 
 .settings { margin-top: 0.7rem; font-size: 0.85rem; }
 .settings summary { cursor: pointer; color: var(--ink-2); }

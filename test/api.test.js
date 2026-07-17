@@ -33,7 +33,7 @@ test('event ingestion, summary and history round-trip', async () => {
   const now = Date.now();
   const res = await post('/api/events', {
     events: [
-      { ts: now - 5000, direction: 'fwd', class: 'car', confidence: 0.91, trackId: 7 },
+      { ts: now - 5000, direction: 'fwd', class: 'car', confidence: 0.91, trackId: 7, line: 'line-abc123' },
       { ts: now - 4000, direction: 'rev', class: 'truck', confidence: 0.75, trackId: 8 },
     ],
   });
@@ -61,6 +61,7 @@ test('rejects malformed events', async () => {
     [[{ direction: 'fwd' }], 'missing ts'],
     [[{ ts: Date.now() + 600_000, direction: 'fwd' }], 'future ts'],
     [[{ ts: Date.now(), direction: 'fwd', confidence: 3 }], 'bad confidence'],
+    [[{ ts: Date.now(), direction: 'fwd', line: 'x'.repeat(65) }], 'line too long'],
   ]) {
     const res = await post('/api/events', { events });
     assert.equal(res.status, 400, `should reject: ${why}`);
@@ -90,6 +91,37 @@ test('delete requires confirmation', async () => {
   assert.equal(res.status, 200);
   const summary = await (await fetch(`${base}/api/stats/summary`)).json();
   assert.equal(summary.allTime.total, 0);
+});
+
+test('preset save, list, load, delete round-trip', async () => {
+  const config = {
+    lines: [{ id: 'line-1', a: { x: 0.1, y: 0.2 }, b: { x: 0.9, y: 0.2 } }],
+    zones: [],
+    view: { z: 2, cx: 0.5, cy: 0.5 },
+  };
+  const put = await fetch(`${base}/api/preset?name=Front%20Window`, {
+    method: 'PUT',
+    body: JSON.stringify(config),
+  });
+  assert.equal(put.status, 200);
+
+  const list = await (await fetch(`${base}/api/presets`)).json();
+  assert.ok(list.presets.some((p) => p.name === 'Front Window'));
+
+  const loaded = await (await fetch(`${base}/api/preset?name=Front%20Window`)).json();
+  assert.deepEqual(loaded, config);
+
+  assert.equal((await fetch(`${base}/api/preset?name=Front%20Window`, { method: 'DELETE' })).status, 200);
+  assert.equal((await fetch(`${base}/api/preset?name=Front%20Window`)).status, 404);
+});
+
+test('preset validation', async () => {
+  assert.equal((await fetch(`${base}/api/preset?name=..%2Fevil`)).status, 400, 'bad name chars');
+  assert.equal((await fetch(`${base}/api/preset`)).status, 400, 'missing name');
+  const arr = await fetch(`${base}/api/preset?name=ok`, { method: 'PUT', body: '[1]' });
+  assert.equal(arr.status, 400, 'array is not a valid preset');
+  const long = await fetch(`${base}/api/preset?name=${'x'.repeat(41)}`, { method: 'PUT', body: '{}' });
+  assert.equal(long.status, 400, 'name too long');
 });
 
 test('unknown api endpoint yields JSON 404', async () => {
