@@ -1,0 +1,12 @@
+# Runtime data (SQLite database lives here)
+data/
+
+# Vendored ML runtime + model (fetched via `npm run setup`)
+public/vendor/
+
+# Editor / tooling
+.specstory/
+.serena/
+.DS_Store
+*.log
+node_modules/

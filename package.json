@@ -1,0 +1,16 @@
+{
+  "name": "car-counter",
+  "version": "1.0.0",
+  "description": "Webcam-based car counting PWA: in-browser vehicle detection and tracking with live and historical traffic statistics",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "setup": "node scripts/fetch-vendor.mjs",
+    "icons": "node scripts/generate-icons.mjs",
+    "test": "node --test test/"
+  },
+  "license": "MIT"
+}
