@@ -300,6 +300,16 @@ function applyView() {
   const view = state.view;
   view.z = Math.max(1, Math.min(10, view.z));
   const stage = refs.videoStage;
+  if (engineRunning()) {
+    // The server's preview already contains the zoomed view at full preview
+    // resolution — CSS-zooming it again would double-apply the crop.
+    stage.style.transform = '';
+    stage.style.transformOrigin = '';
+    refs.zoom.value = view.z;
+    refs.zoomValue.textContent = `${view.z}×`;
+    refs.videoWrap.classList.toggle('zoomed', false);
+    return;
+  }
   if (view.z === 1) {
     stage.style.transform = '';
     stage.style.transformOrigin = '';
@@ -599,11 +609,27 @@ function updatePerfChip() {
 }
 setInterval(updatePerfChip, 2000);
 
+// Engine tracks arrive a few hundred ms stale (poll + preview latency);
+// dead-reckoning them with their server-computed velocities keeps the boxes
+// glued to the cars at full display frame rate.
+const ENGINE_DISPLAY_LAG_MS = 250;
+
+function engineTracksNow() {
+  const tracks = engineStatus.tracks ?? [];
+  const ts = engineStatus.tracksTs;
+  if (!ts) return tracks;
+  const dt = Math.max(-500, Math.min(900, Date.now() - ts - ENGINE_DISPLAY_LAG_MS));
+  return tracks.map((t) => ({
+    ...t,
+    bbox: [t.bbox[0] + (t.vx ?? 0) * dt, t.bbox[1] + (t.vy ?? 0) * dt, t.bbox[2], t.bbox[3]],
+  }));
+}
+
 function frame() {
   overlay.resize();
   if (!HAS_RVFC) step(Date.now());
   overlay.draw({
-    tracks: engineRunning() ? engineStatus.tracks : state.running ? tracker.tracks : [],
+    tracks: engineRunning() ? engineTracksNow() : state.running ? tracker.tracks : [],
     lines: editor.shapes.lines,
     zones: editor.shapes.zones,
     selection: editor.selection,
@@ -719,12 +745,22 @@ function applyEngineUi() {
   refs.engineBtn.classList.toggle('active', running);
   clearInterval(previewTimer);
   if (running) {
+    // The engine owns the camera now — a still-running local pipeline would
+    // double-count every car.
+    if (state.running || refs.video.srcObject) {
+      state.running = false;
+      state.wasRunning = false;
+      rvfcToken += 1;
+      stopSource(refs.video);
+      persistConfig();
+    }
     refs.videoHint.hidden = true;
     setStatus(state.lines.length ? 'counting (server)' : 'server engine on — add a counting line', true);
     previewTimer = setInterval(() => {
       refs.preview.src = `/api/preview?t=${Date.now()}`;
-    }, 300);
+    }, 150);
     editor.setShapes(shapesToPixels());
+    applyView(); // preview arrives pre-zoomed; drop the CSS transform
   } else if (!state.running) {
     refs.videoHint.hidden = false;
     setStatus('ready — start a camera', false);
@@ -963,8 +999,18 @@ if ('serviceWorker' in navigator) {
   if (engineStatus) {
     refs.engineBtn.hidden = false;
     refs.engineSettings.hidden = false;
-    setInterval(pollEngine, 600);
+    setInterval(pollEngine, 300);
     applyEngineUi();
+    // Camera list as seen by the SERVER (the engine captures, not this page).
+    try {
+      const { devices } = await (await fetch('/api/engine/devices')).json();
+      const saved = String((await fetchConfig())?.engine?.device ?? '0');
+      refs.engineDevice.innerHTML = devices
+        .map((d) => `<option value="${d.index}">${d.index}: ${d.name}</option>`)
+        .join('');
+      refs.engineDevice.value = saved;
+      if (refs.engineDevice.value !== saved) refs.engineDevice.selectedIndex = 0;
+    } catch {}
   }
 
   await populateModelSelect();

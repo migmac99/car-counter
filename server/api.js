@@ -76,6 +76,11 @@ export const routes = {
   'GET /api/engine': (store, { engine, engineUnavailableReason }) =>
     engine ? engine.status : { available: false, running: false, reason: engineUnavailableReason },
 
+  'GET /api/engine/devices': (store, { listDevices }) => {
+    if (!listDevices) throw new ApiError(503, 'engine unavailable');
+    return { devices: listDevices() };
+  },
+
   'PUT /api/engine': async (store, { body, engine, engineUnavailableReason }) => {
     if (!engine) throw new ApiError(503, `engine unavailable: ${engineUnavailableReason}`);
     if (typeof body?.running !== 'boolean') throw new ApiError(400, 'body must include running: true|false');

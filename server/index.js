@@ -81,6 +81,7 @@ export function createApp({ dbFile = join(ROOT, 'data', 'car-counter.sqlite') } 
         rawBody,
         engine,
         engineUnavailableReason,
+        listDevices: engineModule?.listDevices,
       });
       if (result instanceof Response) return result;
       return Response.json(result);

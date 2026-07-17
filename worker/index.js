@@ -22,7 +22,7 @@ const opt = (name, fallback) => {
 const has = (name) => args.includes(`--${name}`);
 
 if (has('list-devices')) {
-  console.log(listDevices().join('\n'));
+  for (const d of listDevices()) console.log(`${d.index}: ${d.name}`);
   process.exit(0);
 }
 

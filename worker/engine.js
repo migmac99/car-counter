@@ -25,7 +25,7 @@ import { SpeedMatcher } from '../public/js/speed.js';
 import { pointInPolygon, boxCenter } from '../public/js/geometry.js';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const PREVIEW_FPS = 4;
+const PREVIEW_FPS = 8;
 
 /** Null when the engine can run here, else a human-readable reason. */
 export function checkRequirements() {
@@ -34,14 +34,23 @@ export function checkRequirements() {
   return null;
 }
 
+/** Video capture devices as the server sees them: [{index, name}]. */
 export function listDevices() {
   const res = spawnSync('ffmpeg', ['-f', 'avfoundation', '-list_devices', 'true', '-i', ''], {
     encoding: 'utf8',
   });
-  return (res.stderr ?? '')
-    .split('\n')
-    .filter((l) => l.includes('AVFoundation') && l.includes(']'))
-    .map((l) => l.replace(/^.*AVFoundation[^\]]*\]\s*/, ''));
+  const devices = [];
+  let inVideo = false;
+  for (const line of (res.stderr ?? '').split('\n')) {
+    if (line.includes('AVFoundation video devices')) {
+      inVideo = true;
+      continue;
+    }
+    if (line.includes('AVFoundation audio devices')) break;
+    const m = inVideo ? line.match(/\[(\d+)\]\s+(.+)$/) : null;
+    if (m) devices.push({ index: Number(m[1]), name: m[2].trim() });
+  }
+  return devices;
 }
 
 export class CountingEngine {
@@ -49,7 +58,6 @@ export class CountingEngine {
   #postEvents;
   #ffmpeg = null;
   #session = null;
-  #stopping = false;
   #busy = false;
   #latest = null;
   #queue = [];
@@ -57,6 +65,9 @@ export class CountingEngine {
   #retryTimer = null;
   #restartTimer = null;
   #configSnapshot = null;
+  // Each boot gets a generation; async callbacks from superseded runs
+  // (a killed ffmpeg's late 'close', stale timers) self-discard on mismatch.
+  #generation = 0;
 
   constructor({ getConfig, postEvents }) {
     this.#getConfig = getConfig;
@@ -78,7 +89,10 @@ export class CountingEngine {
   }
 
   get status() {
-    return { available: true, ...this.state, tracks: this.tracks };
+    // Never serve a frozen snapshot: if frames stopped flowing (capture
+    // hiccup), stale tracks would paint ghost boxes in the UI.
+    const fresh = this.state.tracksTs && Date.now() - this.state.tracksTs < 1500;
+    return { available: true, ...this.state, tracks: fresh ? this.tracks : [] };
   }
 
   async preview() {
@@ -92,7 +106,6 @@ export class CountingEngine {
   /** source: { input?: filePath, device?: '0', size?: '1920x1080', fps?: 30, loop?: bool } */
   async start(source = {}) {
     await this.stop();
-    this.#stopping = false;
     this.state.error = null;
     this.state.counted = 0;
     this.state.startedAt = Date.now();
@@ -113,6 +126,7 @@ export class CountingEngine {
   }
 
   async #boot() {
+    const gen = ++this.#generation;
     const config = (await this.#getConfig()) ?? {};
     this.#configSnapshot = JSON.stringify({ view: config.view, model: config.model });
 
@@ -172,13 +186,22 @@ export class CountingEngine {
       ? ['-re', ...(src.loop ? ['-stream_loop', '-1'] : []), '-i', src.input]
       : ['-f', 'avfoundation', '-framerate', String(src.fps), '-video_size', src.size, '-i', src.device];
 
+    // The preview mirrors THE VIEW: when zoomed, it is the zoomed crop at
+    // full preview resolution (sharp), not a scaled full frame. The UI
+    // renders it without any CSS zoom of its own.
+    const previewFilter = [
+      view.z > 1 ? `crop=${crop.w}:${crop.h}:${crop.x}:${crop.y}` : null,
+      'scale=960:-2',
+    ]
+      .filter(Boolean)
+      .join(',');
     this.#ffmpeg = spawn(
       'ffmpeg',
       [
-        '-loglevel', 'error',
+        '-y', '-loglevel', 'error',
         ...inputArgs,
         '-vf', filter, '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1',
-        '-vf', `scale=960:-2`, '-r', String(PREVIEW_FPS), '-q:v', '6',
+        '-vf', previewFilter, '-r', String(PREVIEW_FPS), '-q:v', '5',
         '-update', '1', '-atomic_writing', '1', '-f', 'image2', this.previewPath,
       ],
       { stdio: ['ignore', 'pipe', 'pipe'] }
@@ -190,6 +213,7 @@ export class CountingEngine {
     this.chw = new Float32Array(3 * variant.size * variant.size);
     let buffer = Buffer.alloc(0);
     this.#ffmpeg.stdout.on('data', (chunk) => {
+      if (gen !== this.#generation) return;
       buffer = Buffer.concat([buffer, chunk]);
       while (buffer.length >= frameBytes) {
         this.#latest = buffer.subarray(0, frameBytes);
@@ -206,28 +230,25 @@ export class CountingEngine {
     });
 
     this.#ffmpeg.on('close', (code) => {
-      const wasRunning = this.state.running;
+      if (gen !== this.#generation) return; // a newer run owns the state now
       this.state.running = false;
       this.tracks = [];
-      if (this.#stopping) return;
       if (this.sourceOpts.input) {
         this.state.error = code === 0 ? null : `ffmpeg exited (${code}): ${stderrTail.trim()}`;
         return; // file finished
       }
       // Camera loss (sleep/unplug): retry until stopped explicitly.
       this.state.error = `capture ended (${code}): ${stderrTail.trim() || 'camera lost'} — retrying`;
-      if (wasRunning) {
-        clearTimeout(this.#retryTimer);
-        this.#retryTimer = setTimeout(() => {
-          if (!this.#stopping) this.#boot().catch((err) => (this.state.error = err.message));
-        }, 5000);
-      }
+      clearTimeout(this.#retryTimer);
+      this.#retryTimer = setTimeout(() => {
+        if (gen === this.#generation) this.#boot().catch((err) => (this.state.error = err.message));
+      }, 5000);
     });
 
     clearInterval(this.#flushTimer);
     this.#flushTimer = setInterval(() => {
       this.#flush();
-      this.#refreshConfig();
+      this.#refreshConfig(gen);
       const seconds = (Date.now() - (this.perfStart ?? Date.now())) / 1000 || 1;
       this.state.detPerSec = Math.round((this.perfCount ?? 0) / seconds);
       this.perfCount = 0;
@@ -268,27 +289,23 @@ export class CountingEngine {
       .filter((pts) => pts.length >= 3);
   }
 
-  async #refreshConfig() {
+  async #refreshConfig(gen = this.#generation) {
     try {
       const config = (await this.#getConfig()) ?? {};
+      if (gen !== this.#generation) return;
       this.#applyCountingConfig(config);
       // View or model changes need a capture restart (crop/input geometry).
       const snapshot = JSON.stringify({ view: config.view, model: config.model });
-      if (this.#configSnapshot !== null && snapshot !== this.#configSnapshot && this.state.running) {
-        this.#configSnapshot = snapshot;
+      const changed = this.#configSnapshot !== null && snapshot !== this.#configSnapshot;
+      this.#configSnapshot = snapshot;
+      if (changed && this.state.running) {
         clearTimeout(this.#restartTimer);
         this.#restartTimer = setTimeout(() => {
-          if (this.state.running && !this.#stopping) {
-            this.#stopping = true;
+          if (gen === this.#generation && this.state.running) {
             this.#ffmpeg?.kill('SIGTERM');
-            setTimeout(() => {
-              this.#stopping = false;
-              this.#boot().catch((err) => (this.state.error = err.message));
-            }, 400);
+            this.#boot().catch((err) => (this.state.error = err.message));
           }
         }, 1200);
-      } else {
-        this.#configSnapshot = snapshot;
       }
     } catch {}
   }
@@ -357,14 +374,20 @@ export class CountingEngine {
       counter.prune(liveIds);
     }
     this.speedMatcher.prune(liveIds);
-    // Publish a lightweight track snapshot for the UI overlay.
-    this.tracks = tracks.map((t) => ({
+    // Publish a lightweight track snapshot for the UI overlay. Velocities
+    // (px/ms) let the client dead-reckon smooth motion between polls.
+    // Tracks in their miss grace-period stay alive for re-association but
+    // are NOT displayed — they would render as ghost boxes trailing cars.
+    this.state.tracksTs = now;
+    this.tracks = tracks.filter((t) => t.misses <= 2).map((t) => ({
       id: t.id,
       bbox: t.bbox,
       class: t.class,
       confirmed: t.confirmed,
       kmh: t.kmh,
       over: t.over,
+      vx: t.vx,
+      vy: t.vy,
       history: t.history.slice(-15).map((p) => ({ x: p.x, y: p.y })),
     }));
   }
@@ -381,7 +404,7 @@ export class CountingEngine {
   }
 
   async stop() {
-    this.#stopping = true;
+    this.#generation += 1; // invalidate every callback of the previous run
     clearTimeout(this.#retryTimer);
     clearTimeout(this.#restartTimer);
     clearInterval(this.#flushTimer);
