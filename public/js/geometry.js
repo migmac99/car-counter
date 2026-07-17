@@ -77,3 +77,33 @@ export function iou(boxA, boxB) {
 export function boxCenter([x, y, w, h]) {
   return { x: x + w / 2, y: y + h / 2 };
 }
+
+/**
+ * Bounding-box dimensions that a plausible vehicle detection may not
+ * exceed, derived from the detection zones the user drew: no real vehicle
+ * is taller or wider than the road region itself. Null when no zones exist.
+ */
+export function zoneMaxDims(zonePolys) {
+  let w = 0;
+  let h = 0;
+  for (const poly of zonePolys) {
+    const xs = poly.map((p) => p.x);
+    const ys = poly.map((p) => p.y);
+    w = Math.max(w, Math.max(...xs) - Math.min(...xs));
+    h = Math.max(h, Math.max(...ys) - Math.min(...ys));
+  }
+  return w > 0 ? { w, h } : null;
+}
+
+/**
+ * Detector-hallucination gate: dark or low-texture scenes can produce huge
+ * low-confidence boxes spanning half the frame. A detection larger than the
+ * drawn road region (with 10% slack), or covering more than half the
+ * visible view, is not a vehicle.
+ */
+export function plausibleVehicle(bbox, viewArea, maxDims) {
+  const [, , w, h] = bbox;
+  if (maxDims && (w > maxDims.w * 1.1 || h > maxDims.h * 1.1)) return false;
+  if (viewArea && w * h > viewArea * 0.5) return false;
+  return true;
+}

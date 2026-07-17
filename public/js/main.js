@@ -18,7 +18,8 @@ import {
 } from './api.js';
 import { StatsUi } from './stats-ui.js';
 import { SpeedMatcher } from './speed.js';
-import { pointInPolygon, boxCenter } from './geometry.js';
+import { pointInPolygon, boxCenter, zoneMaxDims, plausibleVehicle } from './geometry.js';
+import { nightFromLuma, effectiveNight, trackingTuning, meanLuma } from './scene.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -53,6 +54,7 @@ const refs = {
   minScore: $('min-score'),
   minScoreValue: $('min-score-value'),
   modelSelect: $('model-select'),
+  sceneMode: $('scene-mode'),
   classFilters: $('class-filters'),
   countModeSel: $('count-mode'),
   presetSelect: $('preset-select'),
@@ -98,7 +100,9 @@ const state = {
   historyView: null, // {bucket, rangeMs}
   speed: { gateA: '', gateB: '', meters: 0, limitKmh: 0 },
   model: 'yolox-tiny',
+  sceneMode: 'auto', // 'auto' | 'day' | 'night'
 };
+let measuredNight = false;
 
 const detector = new Detector();
 const tracker = new Tracker();
@@ -193,10 +197,22 @@ for (const el of ['gateA', 'gateB', 'gateMeters', 'speedLimit']) {
   refs[el].addEventListener('change', onSpeedSettingsChange);
 }
 
+const nightActive = () => effectiveNight(state.sceneMode, measuredNight);
+
+/** Apply scene-appropriate tracking parameters (day vs night blobs). */
+function applySceneTuning() {
+  const t = trackingTuning(nightActive());
+  tracker.minHits = t.minHits;
+  tracker.smoothing = t.smoothing;
+  tracker.maxAgeMs = t.maxAgeMs;
+  tracker.highThresh = state.minScore * t.threshScale;
+  syncCounters();
+}
+
 /** Keep one LineCounter per line; reset crossing state only when geometry moves. */
 function syncCounters() {
   const { h } = videoSize();
-  const hysteresis = Math.max(6, (h || 720) * 0.012);
+  const hysteresis = Math.max(6, (h || 720) * 0.012) * trackingTuning(nightActive()).hysteresisScale;
   const seen = new Set();
   for (const l of state.lines) {
     seen.add(l.id);
@@ -233,6 +249,7 @@ function currentConfig() {
     historyView: state.historyView,
     speed: { ...state.speed },
     model: state.model,
+    sceneMode: state.sceneMode,
   };
 }
 
@@ -266,10 +283,12 @@ function applyConfig(config) {
   state.historyView = config.historyView ?? null;
   state.speed = { gateA: '', gateB: '', meters: 0, limitKmh: 0, ...config.speed };
   state.model = MODELS[config.model] ? config.model : 'yolox-tiny';
+  state.sceneMode = ['auto', 'day', 'night'].includes(config.sceneMode) ? config.sceneMode : 'auto';
   applySpeedConfig();
   refs.minScore.value = state.minScore;
   refs.modelSelect.value = state.model;
-  tracker.highThresh = state.minScore;
+  refs.sceneMode.value = state.sceneMode;
+  applySceneTuning();
   refs.minScoreValue.textContent = state.minScore.toFixed(2);
   refs.countModeSel.value = state.countMode;
   for (const box of refs.classFilters.querySelectorAll('input')) {
@@ -517,9 +536,13 @@ async function step(now) {
     const zonePolys = state.zones
       .map((z) => z.points.map(toPixels))
       .filter((pts) => pts.length >= 3 && pts.every(Boolean));
+    const { w: fw, h: fh } = frameSize();
+    const viewArea = (fw * fh) / (state.view.z * state.view.z);
+    const maxDims = zoneMaxDims(zonePolys);
+    const sane = detections.filter((d) => plausibleVehicle(d.bbox, viewArea, maxDims));
     const inZone = zonePolys.length
-      ? detections.filter((d) => zonePolys.some((poly) => pointInPolygon(boxCenter(d.bbox), poly)))
-      : detections;
+      ? sane.filter((d) => zonePolys.some((poly) => pointInPolygon(boxCenter(d.bbox), poly)))
+      : sane;
     const tracks = tracker.update(inZone, now);
     const liveIds = new Set(tracks.map((t) => t.id));
     if (autoRoad) collectAutoRoad(tracks);
@@ -576,14 +599,32 @@ setInterval(() => {
   if (document.hidden && state.running) step(Date.now());
 }, 500);
 
+let lumaCanvas = null;
+
+/** Sample the current frame's brightness (cheap 24×14 read, every chip tick). */
+function sampleLuma() {
+  if (!state.running || refs.video.readyState < 2) return;
+  lumaCanvas ??= document.createElement('canvas');
+  lumaCanvas.width = 24;
+  lumaCanvas.height = 14;
+  const ctx = lumaCanvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(refs.video, 0, 0, 24, 14);
+  const { data } = ctx.getImageData(0, 0, 24, 14);
+  const wasNight = nightActive();
+  measuredNight = nightFromLuma(meanLuma(data, 4), measuredNight);
+  if (nightActive() !== wasNight) applySceneTuning();
+}
+
 function updatePerfChip() {
   if (engineRunning()) {
     const s = engineStatus;
-    refs.perf.textContent = `${s.frame.w}×${s.frame.h} · det ${s.detPerSec}/s · ${s.detMs} ms · ${s.ep} (server)`;
+    const night = s.night ? ' · night' : '';
+    refs.perf.textContent = `${s.frame.w}×${s.frame.h} · det ${s.detPerSec}/s · ${s.detMs} ms · ${s.ep} (server)${night}`;
     refs.perf.hidden = false;
     refs.perf.classList.remove('warn');
     return;
   }
+  sampleLuma();
   const now = performance.now();
   const seconds = (now - perf.windowStart) / 1000;
   perf.windowStart = now;
@@ -601,7 +642,8 @@ function updatePerfChip() {
   const size = cam ? `${cam.width}×${cam.height}` : `${refs.video.videoWidth}×${refs.video.videoHeight}`;
   const fpsText = camFps != null ? ` @${camFps}` : '';
   const ep = detector.backendInfo ? ` · ${detector.backendInfo}` : '';
-  refs.perf.textContent = `${size}${fpsText} · det ${detPerSec}/s · ${Math.max(1, Math.round(perf.detMs))} ms${ep}`;
+  const night = nightActive() ? ' · night' : '';
+  refs.perf.textContent = `${size}${fpsText} · det ${detPerSec}/s · ${Math.max(1, Math.round(perf.detMs))} ms${ep}${night}`;
   refs.perf.hidden = false;
   // A camera below ~15 fps (long exposure in low light, USB bandwidth) blurs
   // motion and starves the tracker — flag it.
@@ -826,7 +868,13 @@ refs.flipBtn.addEventListener('click', () => editor.flipTargetLine());
 refs.minScore.addEventListener('input', () => {
   state.minScore = Number(refs.minScore.value);
   refs.minScoreValue.textContent = state.minScore.toFixed(2);
-  tracker.highThresh = state.minScore; // ByteTrack stage-1 threshold
+  applySceneTuning(); // sets the ByteTrack stage-1 threshold scene-aware
+  persistConfig();
+});
+
+refs.sceneMode.addEventListener('change', () => {
+  state.sceneMode = refs.sceneMode.value;
+  applySceneTuning();
   persistConfig();
 });
 

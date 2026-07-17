@@ -22,7 +22,8 @@ import { YOLOX_CLASSES, YOLOX_VARIANTS, buildGrids, decode, nms } from '../publi
 import { Tracker } from '../public/js/tracker.js';
 import { LineCounter } from '../public/js/counter.js';
 import { SpeedMatcher } from '../public/js/speed.js';
-import { pointInPolygon, boxCenter } from '../public/js/geometry.js';
+import { pointInPolygon, boxCenter, zoneMaxDims, plausibleVehicle } from '../public/js/geometry.js';
+import { nightFromLuma, effectiveNight, trackingTuning, meanLuma } from '../public/js/scene.js';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PREVIEW_FPS = 8;
@@ -174,6 +175,9 @@ export class CountingEngine {
     this.scale = variant.size / Math.max(crop.w, crop.h);
     const contentW = Math.max(2, Math.round(crop.w * this.scale) & ~1);
     const contentH = Math.max(2, Math.round(crop.h * this.scale) & ~1);
+    // Brightness sampling must exclude the grey letterbox padding, which
+    // would bias the day/night decision toward "day".
+    this.contentBytes = contentH * variant.size * 3;
 
     const filter = [
       view.z > 1 ? `crop=${crop.w}:${crop.h}:${crop.x}:${crop.y}` : null,
@@ -261,8 +265,13 @@ export class CountingEngine {
   #applyCountingConfig(config) {
     this.lastConfig = config;
     const frame = this.state.frame ?? { w: 1, h: 1 };
+    const night = effectiveNight(config.sceneMode ?? 'auto', this.state.night ?? false);
+    const tuning = trackingTuning(night);
     this.tracker ??= new Tracker();
-    this.tracker.highThresh = config.minScore ?? 0.5;
+    this.tracker.highThresh = (config.minScore ?? 0.5) * tuning.threshScale;
+    this.tracker.minHits = tuning.minHits;
+    this.tracker.smoothing = tuning.smoothing;
+    this.tracker.maxAgeMs = tuning.maxAgeMs;
     this.classes = new Set(config.classes ?? ['car', 'truck', 'bus', 'motorcycle']);
     this.speedMatcher ??= new SpeedMatcher();
     this.speedMatcher.configure(config.speed ?? {});
@@ -275,7 +284,7 @@ export class CountingEngine {
         counter = new LineCounter();
         this.counters.set(line.id, counter);
       }
-      counter.hysteresis = Math.max(6, frame.h * 0.012);
+      counter.hysteresis = Math.max(6, frame.h * 0.012) * tuning.hysteresisScale;
       const a = { x: line.a.x * frame.w, y: line.a.y * frame.h };
       const b = { x: line.b.x * frame.w, y: line.b.y * frame.h };
       const prev = counter.line;
@@ -287,6 +296,7 @@ export class CountingEngine {
     this.zones = (config.zones ?? [])
       .map((z) => z.points.map((p) => ({ x: p.x * frame.w, y: p.y * frame.h })))
       .filter((pts) => pts.length >= 3);
+    this.zoneDims = zoneMaxDims(this.zones);
   }
 
   async #refreshConfig(gen = this.#generation) {
@@ -320,6 +330,18 @@ export class CountingEngine {
     const size = this.inputSize;
     const plane = size * size;
     const chw = this.chw;
+    // Scene brightness → night mode (with hysteresis; re-tunes on flip).
+    const luma = meanLuma(rgb.subarray(0, this.contentBytes || rgb.length), 3);
+    const wasNight = this.state.night ?? false;
+    const night = effectiveNight(
+      this.lastConfig?.sceneMode ?? 'auto',
+      nightFromLuma(luma, wasNight)
+    );
+    if (night !== wasNight) {
+      this.state.night = night;
+      if (this.lastConfig) this.#applyCountingConfig(this.lastConfig);
+    }
+    this.state.night = night;
     for (let i = 0; i < plane; i++) {
       const p = i * 3;
       chw[i] = rgb[p + 2];
@@ -334,6 +356,7 @@ export class CountingEngine {
     this.perfCount = (this.perfCount ?? 0) + 1;
 
     const now = Date.now();
+    const viewArea = this.crop.w * this.crop.h;
     const detections = nms(decode(out, this.grids, 0.1))
       .map((d) => ({
         bbox: [
@@ -345,7 +368,7 @@ export class CountingEngine {
         class: YOLOX_CLASSES[d.classId],
         score: Math.min(1, d.score),
       }))
-      .filter((d) => this.classes.has(d.class));
+      .filter((d) => this.classes.has(d.class) && plausibleVehicle(d.bbox, viewArea, this.zoneDims));
     const inZone = this.zones.length
       ? detections.filter((d) => this.zones.some((poly) => pointInPolygon(boxCenter(d.bbox), poly)))
       : detections;

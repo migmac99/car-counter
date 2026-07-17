@@ -67,11 +67,29 @@ at a road may detect almost nothing. Mount the camera with a street-level or
 moderately elevated side view. (Verified empirically: an overhead parking-lot
 video yielded no detections while a side-view car was detected at 0.9+.)
 
-## 2. Zone filter
+## 2. Zone filter & plausibility gate
 
 If a detection zone (polygon) is drawn, detections whose **box center** falls
 outside it are discarded before tracking. Use it to exclude a parking lane,
 sidewalk, or the far carriageway.
+
+Zones also feed a **size-sanity gate**: no real vehicle is taller or wider
+than the road region you drew, so detections exceeding the zone's bounding
+dimensions (+10 % slack) are rejected as detector hallucinations — dark or
+low-texture scenes love producing huge phantom boxes over scattered lights.
+Without zones, anything covering more than half the visible view is
+rejected. Drawing an accurate road zone is the single best thing you can do
+for night reliability.
+
+## 2b. Scene mode (day / night)
+
+Settings → Scene (default **auto**: mean frame brightness with hysteresis so
+dusk doesn't flap). At night, vehicles are essentially headlight blobs, so
+the pipeline retunes: the association threshold relaxes (real cars score
+lower), track confirmation demands more evidence (`minHits` 3 → 4 — flickery
+lights must persist before they count), centroid smoothing deepens, track
+memory lengthens, and the crossing dead-band widens. The active mode shows
+in the perf chip (`· night`).
 
 ## 3. Tracking — `tracker.js`
 

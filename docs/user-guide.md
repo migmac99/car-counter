@@ -127,6 +127,9 @@ automatically** on the next visit.
   detections still help *keep tracking* already-confirmed vehicles — they
   just can't start a new count.)
 - **Vehicle classes**: cars, trucks, buses, motorcycles.
+- **Scene** (auto/day/night): night retunes tracking for headlight blobs —
+  see [detection-and-tracking.md](detection-and-tracking.md#2b-scene-mode-day--night).
+  Auto measures frame brightness and switches by itself.
 - **Count**: both directions, forward only, or reverse only — affects the
   displayed totals; both directions are always recorded.
 - **Delete all history…**: wipes every stored event (asks for confirmation).
@@ -229,6 +232,7 @@ HTTP from any device — only the camera needs the secure context.
 | "model failed to load" | Run `bun run setup` on the server, or check connectivity for the CDN fallback |
 | Nothing gets detected | Check the viewpoint (avoid overhead angles), raise camera resolution, lower Min confidence, make sure vehicles are reasonably large in frame |
 | Only some vehicles counted | Lower Min confidence (distant/blurry cars score low); switch to a stronger model (YOLOX-s); check the perf chip — `det/s` should match camera fps, and `webgpu` beats `wasm` |
+| Giant phantom boxes at night | Draw a detection zone around the road — it powers a size-sanity gate that rejects impossible detections; keep Scene on auto (the chip shows `· night` when engaged) |
 | Cars counted twice | Raise Min confidence; draw the line where traffic doesn't stop on it; the built-in hysteresis+cooldown handles normal jitter |
 | Counts missed | Line too close to the frame edge (tracks need ≥ 3 detections before counting); occlusion in dense traffic; try a cleaner stretch of road |
 | Stats not updating | The event queue uploads every 3 s — check the server is running; offline events appear after reconnect |
