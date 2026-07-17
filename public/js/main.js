@@ -45,6 +45,7 @@ const refs = {
   drawRoiBtn: $('draw-roi-btn'),
   autoRoadBtn: $('auto-road-btn'),
   deleteShapeBtn: $('delete-shape-btn'),
+  engineSize: $('engine-size'),
   gateA: $('gate-a'),
   gateB: $('gate-b'),
   gateMeters: $('gate-meters'),
@@ -619,9 +620,11 @@ function updatePerfChip() {
   if (engineRunning()) {
     const s = engineStatus;
     const night = s.night ? ' · night' : '';
-    refs.perf.textContent = `${s.frame.w}×${s.frame.h} · det ${s.detPerSec}/s · ${s.detMs} ms · ${s.ep} (server)${night}`;
+    const cam = s.camFps != null ? ` cam ${s.camFps}/s ·` : '';
+    refs.perf.textContent = `${s.frame.w}×${s.frame.h} ·${cam} det ${s.detPerSec}/s · ${s.detMs} ms · ${s.ep} (server)${night}`;
     refs.perf.hidden = false;
-    refs.perf.classList.remove('warn');
+    // Low camera fps at night is exposure physics; flag it only in daylight.
+    refs.perf.classList.toggle('warn', !s.night && s.camFps > 0 && s.camFps < 15);
     return;
   }
   sampleLuma();
@@ -859,6 +862,7 @@ refs.engineBtn.addEventListener('click', async () => {
     engineStatus = await setEngine({
       running: !engineRunning(),
       device: refs.engineDevice.value || '0',
+      size: refs.engineSize.value || '1920x1080',
     });
     applyEngineUi();
   } catch (err) {
@@ -1090,12 +1094,14 @@ if ('serviceWorker' in navigator) {
     // Camera list as seen by the SERVER (the engine captures, not this page).
     try {
       const { devices } = await (await fetch('/api/engine/devices')).json();
-      const saved = String((await fetchConfig())?.engine?.device ?? '0');
+      const savedEngine = (await fetchConfig())?.engine ?? {};
+      const saved = String(savedEngine.device ?? '0');
       refs.engineDevice.innerHTML = devices
         .map((d) => `<option value="${d.index}">${d.index}: ${d.name}</option>`)
         .join('');
       refs.engineDevice.value = saved;
       if (refs.engineDevice.value !== saved) refs.engineDevice.selectedIndex = 0;
+      if (savedEngine.size) refs.engineSize.value = savedEngine.size;
     } catch {}
   }
 

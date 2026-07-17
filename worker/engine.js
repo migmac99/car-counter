@@ -240,6 +240,7 @@ export class CountingEngine {
           filled = 0;
           assembling.copy(latest); // one bounded memcpy per frame
           pending = true;
+          this.camFrames = (this.camFrames ?? 0) + 1;
         }
       }
       maybeProcess();
@@ -267,6 +268,10 @@ export class CountingEngine {
       this.#refreshConfig(gen);
       const seconds = (Date.now() - (this.perfStart ?? Date.now())) / 1000 || 1;
       this.state.detPerSec = Math.round((this.perfCount ?? 0) / seconds);
+      // Camera fps separate from det/s: when they match, inference keeps up
+      // and any slowness is the CAMERA (night exposure caps webcam fps).
+      this.state.camFps = Math.round((this.camFrames ?? 0) / seconds);
+      this.camFrames = 0;
       this.perfCount = 0;
       this.perfStart = Date.now();
     }, 2000);

@@ -185,6 +185,14 @@ and the engine re-acquires the camera automatically on wake. Engine
 problems (camera permission, unplugged device) appear in the status chip
 with remediation hints — a healthy engine shows `counting (server)`.
 
+**Frame rate at night is camera physics, not server speed.** The perf chip
+shows the two separately: `cam 5/s · det 5/s · 8 ms` means the server
+processes every frame with huge headroom — the *camera* delivers 5 fps
+because low light forces long exposures (measured on a C922: 5 fps at
+1080p, 10 fps at 720p at night; 30 fps in daylight). Settings → capture
+lets you trade resolution for frame rate: 720p doubles night fps. Any
+scene lighting helps more than any setting.
+
 **Fully offline**: after `bun i` (which vendors every ML runtime and
 model), the system makes zero external network requests — verified by
 auditing a complete browser session. The whole stack runs air-gapped.
