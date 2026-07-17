@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
+import { Database } from 'bun:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -23,16 +23,16 @@ CREATE TABLE IF NOT EXISTS config (
 `;
 
 const BUCKETS = {
-  minute: { fmt: '%Y-%m-%dT%H:%M', stepMs: 60_000, maxRangeMs: 24 * 3600_000 },
-  hour: { fmt: '%Y-%m-%dT%H:00', stepMs: 3600_000, maxRangeMs: 60 * 86_400_000 },
-  day: { fmt: '%Y-%m-%d', stepMs: 86_400_000, maxRangeMs: 400 * 86_400_000 },
+  minute: { stepMs: 60_000, maxRangeMs: 24 * 3600_000 },
+  hour: { stepMs: 3600_000, maxRangeMs: 60 * 86_400_000 },
+  day: { stepMs: 86_400_000, maxRangeMs: 400 * 86_400_000 },
 };
 
 function pad(n) {
   return String(n).padStart(2, '0');
 }
 
-/** Format a timestamp as a local-time bucket key matching SQLite's strftime output. */
+/** Format a timestamp as a local-time bucket key (e.g. "2026-07-17T13:56"). */
 export function bucketKey(ts, bucket) {
   const d = new Date(ts);
   const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -60,7 +60,7 @@ function nextBucket(ts, bucket) {
 export class Store {
   constructor(file) {
     if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
-    this.db = new DatabaseSync(file);
+    this.db = new Database(file);
     this.db.exec('PRAGMA journal_mode = WAL;');
     this.db.exec(SCHEMA);
     this.stmts = {
@@ -77,6 +77,11 @@ export class Store {
       bounds: this.db.prepare(
         `SELECT MIN(ts) AS first, MAX(ts) AS last, COUNT(*) AS n FROM events`
       ),
+      perMinute: this.db.prepare(
+        `SELECT (ts / 60000) * 60000 AS minute, direction, COUNT(*) AS n
+         FROM events WHERE ts >= ? AND ts <= ?
+         GROUP BY minute, direction`
+      ),
       getConfig: this.db.prepare(`SELECT value FROM config WHERE key = ?`),
       setConfig: this.db.prepare(
         `INSERT INTO config (key, value, updated_at) VALUES (?, ?, ?)
@@ -87,8 +92,8 @@ export class Store {
   }
 
   insertEvents(events, receivedAt = Date.now()) {
-    this.db.exec('BEGIN');
-    try {
+    // bun:sqlite transactions roll back automatically when the callback throws.
+    this.db.transaction(() => {
       for (const e of events) {
         this.stmts.insert.run(
           e.ts,
@@ -100,11 +105,7 @@ export class Store {
           receivedAt
         );
       }
-      this.db.exec('COMMIT');
-    } catch (err) {
-      this.db.exec('ROLLBACK');
-      throw err;
-    }
+    })();
     return events.length;
   }
 
@@ -137,8 +138,13 @@ export class Store {
   }
 
   /**
-   * Time-bucketed counts per direction, zero-filled over [from, to].
-   * Buckets use local server time (matches the SQLite `localtime` modifier).
+   * Time-bucketed counts per direction, zero-filled over [from, to], in the
+   * server's local time. SQL only pre-aggregates into UTC minute buckets
+   * (timezone offsets are always whole minutes, so local minute boundaries
+   * align with UTC ones everywhere); all calendar math — hours, DST-safe
+   * days, bucket keys — happens in JS so there is exactly one source of
+   * local time. (SQLite's own `localtime` modifier uses libc and can
+   * disagree with the JS engine's timezone.)
    */
   history({ bucket = 'minute', from, to } = {}) {
     const spec = BUCKETS[bucket];
@@ -148,19 +154,12 @@ export class Store {
     from = from ?? to - Math.min(spec.stepMs * 60, spec.maxRangeMs);
     if (to - from > spec.maxRangeMs) from = to - spec.maxRangeMs;
 
-    const rows = this.db
-      .prepare(
-        `SELECT strftime('${spec.fmt}', ts / 1000, 'unixepoch', 'localtime') AS key,
-                direction, COUNT(*) AS n
-         FROM events WHERE ts >= ? AND ts <= ?
-         GROUP BY key, direction`
-      )
-      .all(from, to);
     const byKey = new Map();
-    for (const r of rows) {
-      const entry = byKey.get(r.key) ?? { fwd: 0, rev: 0 };
-      entry[r.direction] = r.n;
-      byKey.set(r.key, entry);
+    for (const r of this.stmts.perMinute.all(from, to)) {
+      const key = bucketKey(r.minute, bucket);
+      const entry = byKey.get(key) ?? { fwd: 0, rev: 0 };
+      entry[r.direction] += r.n;
+      byKey.set(key, entry);
     }
 
     const buckets = [];

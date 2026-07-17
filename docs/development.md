@@ -3,42 +3,48 @@
 ## Repo layout
 
 ```
-server/           Zero-dependency Node 22 server
-  index.js        HTTP server, routing, security headers, createApp() for tests
-  api.js          Route table + validation
-  db.js           SQLite Store: schema, prepared statements, aggregation
+server/           Zero-dependency Bun server
+  index.js        Bun.serve fetch handler, routing, security headers,
+                  createApp()/startServer() for tests
+  api.js          Route table + validation (runtime-agnostic pure handlers)
+  db.js           bun:sqlite Store: schema, prepared statements, aggregation
   static.js       Static file serving (ETag, cache policy, traversal guard)
 public/           The PWA (ES modules, no build step)
   js/             App modules — geometry/tracker/counter are DOM-free and unit-tested
   css/app.css     Theme tokens (light/dark) + layout + chart styles
   icons/          Generated PNGs (committed)
-  vendor/         ML runtime + model — gitignored, created by npm run setup
+  vendor/         ML runtime + model — gitignored, created by bun run setup
   sw.js           Service worker (see Caching below)
 scripts/
   fetch-vendor.mjs    Downloads TF.js + COCO-SSD model into public/vendor/
   generate-icons.mjs  Renders the icon set with a hand-rolled PNG encoder
-test/             node:test suites (unit + full-server integration)
+test/             bun:test suites (unit + full-server integration)
 docs/             You are here
 data/             SQLite database — gitignored, created on first run
 ```
 
 ## Principles
 
-- **Zero runtime dependencies.** Node 22 built-ins only. There is no
-  `package-lock.json` because there is nothing to lock; `npm install` is
-  never needed.
+- **Zero runtime dependencies.** Bun built-ins (`Bun.serve`, `bun:sqlite`)
+  plus its Node-API compatibility layer (`node:fs`, `node:path`, `node:zlib`
+  in the scripts). There is no lockfile because there is nothing to lock;
+  `bun install` is never needed.
 - **No build step.** The frontend is plain ES modules served as-is.
 - **Pure logic stays pure.** `geometry.js`, `tracker.js`, `counter.js` and
   `server/db.js` have no DOM/network dependencies, so the interesting
-  algorithms are testable in Node without a browser.
+  algorithms are testable headlessly with `bun test`.
+- **One source of local time.** All calendar math lives in JS; SQL only
+  aggregates UTC minute buckets. Never reintroduce SQLite's `localtime`
+  modifier — libc's timezone can disagree with the JS engine's (bun test
+  runs JS in UTC, for instance), which silently zeroes the history charts.
 
 ## Scripts
 
 ```sh
-npm start        # run the server (PORT, HOST env vars)
-npm test         # node --test test/*.test.js  — 39 tests, ~100 ms
-npm run setup    # fetch ML vendor files (idempotent; --force to re-fetch)
-npm run icons    # regenerate public/icons/*.png after changing the art
+bun start        # run the server (PORT, HOST env vars)
+bun test         # 39 tests across 5 files, ~40 ms
+bun run setup    # fetch ML vendor files (idempotent; --force to re-fetch)
+bun run icons    # regenerate public/icons/*.png after changing the art
 ```
 
 ## Testing
@@ -48,8 +54,12 @@ npm run icons    # regenerate public/icons/*.png after changing the art
 - `counter.test.js` — direction semantics, hysteresis, extent, cooldown
 - `db.test.js` — aggregation windows, zero-fill, local-time bucket keys,
   range caps, constraint rollback (in-memory SQLite)
-- `api.test.js` — full server on an ephemeral port: validation, round-trips,
-  security headers, traversal rejection
+- `api.test.js` — full `Bun.serve` server on an ephemeral port: validation,
+  round-trips, security headers, traversal rejection
+
+Note `bun test` runs the JS engine in UTC regardless of system timezone —
+which is exactly the environment that caught the dual-source-of-local-time
+bug described above.
 
 For end-to-end verification of the CV pipeline, feed a video file through
 **Open video…** — a clip with a known number of crossings makes a good manual

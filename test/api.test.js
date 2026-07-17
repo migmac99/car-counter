@@ -1,17 +1,20 @@
-import { test, before, after } from 'node:test';
+import { test, beforeAll, afterAll } from 'bun:test';
 import assert from 'node:assert/strict';
-import { createApp } from '../server/index.js';
+import { startServer } from '../server/index.js';
 
 let server;
+let store;
 let base;
 
-before(async () => {
-  ({ server } = createApp({ dbFile: ':memory:' }));
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  base = `http://127.0.0.1:${server.address().port}`;
+beforeAll(() => {
+  ({ server, store } = startServer({ port: 0, dbFile: ':memory:' }));
+  base = `http://localhost:${server.port}`;
 });
 
-after(() => new Promise((resolve) => server.close(resolve)));
+afterAll(() => {
+  server.stop(true);
+  store.close();
+});
 
 const post = (path, body) =>
   fetch(base + path, {

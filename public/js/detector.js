@@ -1,6 +1,6 @@
 /**
  * COCO-SSD vehicle detector. Prefers the self-hosted runtime + model under
- * /vendor/ (populated by `npm run setup`); falls back to CDN + Google-hosted
+ * /vendor/ (populated by `bun run setup`); falls back to CDN + Google-hosted
  * model when vendor files are absent.
  */
 

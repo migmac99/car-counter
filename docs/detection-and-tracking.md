@@ -12,7 +12,7 @@ video frame → detect (COCO-SSD) → filter (class, confidence, zone)
 - Model: **COCO-SSD, `lite_mobilenet_v2` base** via TensorFlow.js. Small
   (~14 MB), fast (10–70 ms/frame on a laptop GPU via WebGL), good enough for
   street-level traffic scenes.
-- Loading order: self-hosted `/vendor/` files (populated by `npm run setup`),
+- Loading order: self-hosted `/vendor/` files (populated by `bun run setup`),
   falling back to jsDelivr + Google-hosted model when absent.
 - Kept classes: `car`, `truck`, `bus`, `motorcycle` (user-filterable in
   Settings). Detections below the confidence threshold (default 0.5,

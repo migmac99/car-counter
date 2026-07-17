@@ -10,5 +10,5 @@
 
 **TL;DR of the system**: the browser does the computer vision (TensorFlow.js
 COCO-SSD + a small IoU tracker + a line-crossing counter) and POSTs one tiny
-JSON event per car crossing to a zero-dependency Node server, which stores
+JSON event per car crossing to a zero-dependency Bun server, which stores
 events in SQLite and serves aggregated statistics back to the dashboard.

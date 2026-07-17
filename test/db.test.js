@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { Store, bucketKey, bucketFloor } from '../server/db.js';
 
@@ -49,7 +49,7 @@ test('history minute buckets are zero-filled and correctly counted', () => {
   store.close();
 });
 
-test('history day buckets use local-time keys matching SQLite', () => {
+test('history day buckets use JS local-time keys', () => {
   const store = freshStore();
   const noon = Date.parse('2026-07-15T12:00:00');
   store.insertEvents([ev(noon), ev(noon + 3600_000, 'rev')]);

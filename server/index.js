@@ -1,11 +1,9 @@
-import { createServer } from 'node:http';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { Store } from './db.js';
 import { routes, ApiError } from './api.js';
 import { makeStaticHandler } from './static.js';
 
-const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const ROOT = resolve(import.meta.dir, '..');
 const MAX_BODY_BYTES = 512 * 1024;
 
 // The app runs detection locally and only talks to its own origin, plus the
@@ -26,39 +24,16 @@ const SECURITY_HEADERS = {
   ].join('; '),
 };
 
-function readBody(req) {
-  return new Promise((resolvePromise, reject) => {
-    const chunks = [];
-    let size = 0;
-    req.on('data', (chunk) => {
-      size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
-        reject(new ApiError(413, 'request body too large'));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', () => resolvePromise(Buffer.concat(chunks)));
-    req.on('error', reject);
-  });
-}
-
 export function createApp({ dbFile = join(ROOT, 'data', 'car-counter.sqlite') } = {}) {
   const store = new Store(dbFile);
   const serveStatic = makeStaticHandler(join(ROOT, 'public'));
 
-  const server = createServer(async (req, res) => {
-    const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
-    for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
-
+  async function handle(req, url) {
     if (!url.pathname.startsWith('/api/')) {
       if (req.method !== 'GET' && req.method !== 'HEAD') {
-        res.writeHead(405).end();
-        return;
+        return new Response(null, { status: 405 });
       }
-      await serveStatic(req, res, url.pathname);
-      return;
+      return serveStatic(req, url.pathname);
     }
 
     try {
@@ -66,38 +41,61 @@ export function createApp({ dbFile = join(ROOT, 'data', 'car-counter.sqlite') } 
       if (!handler) throw new ApiError(404, 'no such endpoint');
       let body, rawBody;
       if (req.method === 'POST' || req.method === 'PUT') {
-        rawBody = await readBody(req);
+        rawBody = await req.text();
+        if (Buffer.byteLength(rawBody) > MAX_BODY_BYTES) {
+          throw new ApiError(413, 'request body too large');
+        }
         try {
-          body = JSON.parse(rawBody.toString('utf8') || 'null');
+          body = JSON.parse(rawBody || 'null');
         } catch {
           throw new ApiError(400, 'body must be valid JSON');
         }
       }
       const result = handler(store, { query: url.searchParams, body, rawBody });
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify(result));
+      return Response.json(result);
     } catch (err) {
       const status = err instanceof ApiError ? err.status : 500;
       if (status === 500) console.error(`[api] ${req.method} ${url.pathname}:`, err);
-      res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ error: err instanceof ApiError ? err.message : 'internal error' }));
+      return Response.json(
+        { error: err instanceof ApiError ? err.message : 'internal error' },
+        { status }
+      );
     }
-  });
+  }
 
-  server.on('close', () => store.close());
-  return { server, store };
+  async function fetch(req) {
+    const res = await handle(req, new URL(req.url));
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
+    return res;
+  }
+
+  return { fetch, store };
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
-if (isMain) {
-  const port = Number(process.env.PORT ?? 3000);
-  const host = process.env.HOST ?? '0.0.0.0';
-  const { server } = createApp();
-  server.listen(port, host, () => {
-    console.log(`car-counter listening on http://localhost:${port} (bound to ${host})`);
-    console.log('Note: camera access from other devices requires HTTPS — see docs/user-guide.md');
+export function startServer({
+  port = Number(process.env.PORT ?? 3000),
+  hostname = process.env.HOST ?? '0.0.0.0',
+  dbFile,
+} = {}) {
+  const app = createApp(dbFile ? { dbFile } : {});
+  const server = Bun.serve({
+    port,
+    hostname,
+    maxRequestBodySize: MAX_BODY_BYTES,
+    fetch: app.fetch,
   });
+  return { server, store: app.store };
+}
+
+if (import.meta.main) {
+  const { server, store } = startServer();
+  console.log(`car-counter listening on http://localhost:${server.port} (bound to ${server.hostname})`);
+  console.log('Note: camera access from other devices requires HTTPS — see docs/user-guide.md');
   for (const signal of ['SIGINT', 'SIGTERM']) {
-    process.on(signal, () => server.close(() => process.exit(0)));
+    process.on(signal, () => {
+      server.stop();
+      store.close();
+      process.exit(0);
+    });
   }
 }

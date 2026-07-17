@@ -1,4 +1,3 @@
-import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 
@@ -29,37 +28,32 @@ function cacheControl(pathname) {
 
 export function makeStaticHandler(rootDir) {
   const root = resolve(rootDir);
-  return async function serveStatic(req, res, pathname) {
+  return async function serveStatic(req, pathname) {
     if (pathname === '/') pathname = '/index.html';
     const filePath = normalize(join(root, pathname));
     if (!filePath.startsWith(root + sep)) {
-      res.writeHead(403).end('Forbidden');
-      return;
+      return new Response('Forbidden', { status: 403 });
     }
     let info;
     try {
       info = await stat(filePath);
       if (!info.isFile()) throw new Error('not a file');
     } catch {
-      res.writeHead(404, { 'Content-Type': 'text/plain' }).end('Not found');
-      return;
+      return new Response('Not found', { status: 404, headers: { 'Content-Type': 'text/plain' } });
     }
 
     const etag = `W/"${info.size.toString(16)}-${info.mtimeMs.toString(16)}"`;
-    if (req.headers['if-none-match'] === etag) {
-      res.writeHead(304).end();
-      return;
-    }
-    res.writeHead(200, {
+    const headers = {
       'Content-Type': MIME[extname(filePath)] ?? 'application/octet-stream',
-      'Content-Length': info.size,
       'Cache-Control': cacheControl(pathname),
       ETag: etag,
-    });
-    if (req.method === 'HEAD') {
-      res.end();
-      return;
+    };
+    if (req.headers.get('if-none-match') === etag) {
+      return new Response(null, { status: 304, headers });
     }
-    createReadStream(filePath).pipe(res);
+    if (req.method === 'HEAD') {
+      return new Response(null, { headers: { ...headers, 'Content-Length': String(info.size) } });
+    }
+    return new Response(Bun.file(filePath), { headers });
   };
 }

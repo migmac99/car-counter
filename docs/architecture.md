@@ -16,7 +16,7 @@ flowchart LR
     CNT --> OVR[Canvas overlay]
     UI[Stats UI + charts] --> |poll| API
   end
-  subgraph Server [Node 22 server — zero dependencies]
+  subgraph Server [Bun server — zero dependencies]
     API["HTTP API<br/>server/api.js"] --> DB[("SQLite<br/>data/car-counter.sqlite")]
     STATIC[Static files<br/>server/static.js]
   end
@@ -30,17 +30,25 @@ vehicle class, confidence, track id. No frames, no images, no identifiers.
 
 ### Server (`server/`)
 
-Built exclusively on Node 22 built-ins (`node:http`, `node:sqlite`) — there is
-no `node_modules`. Three modules:
+Built exclusively on [Bun](https://bun.sh) built-ins (`Bun.serve`,
+`bun:sqlite`) around web-standard `Request`/`Response` — there is no
+`node_modules`. Three modules:
 
-- **`index.js`** — HTTP server, request routing, JSON body handling (512 KB
-  limit), security headers, graceful shutdown. Exports `createApp()` so tests
-  can run the whole server on an ephemeral port with an in-memory database.
+- **`index.js`** — `Bun.serve` fetch handler, request routing, JSON body
+  handling (512 KB limit via `maxRequestBodySize` + an explicit check),
+  security headers, graceful shutdown. Exports `createApp()` /
+  `startServer()` so tests run the whole server on an ephemeral port with an
+  in-memory database.
 - **`api.js`** — route table and input validation (`ApiError` carries the HTTP
-  status). See [api.md](api.md).
-- **`db.js`** — `Store` class wrapping SQLite with WAL mode, prepared
+  status); pure functions of `(store, {query, body})`, runtime-agnostic. See
+  [api.md](api.md).
+- **`db.js`** — `Store` class wrapping `bun:sqlite` with WAL mode, prepared
   statements, transactional batch inserts, and time-bucketed aggregation
-  (minute/hour/day in **server-local time**, zero-filled). The schema:
+  (minute/hour/day in **server-local time**, zero-filled). SQL pre-aggregates
+  into UTC minute buckets only; all calendar math (hours, DST-safe days,
+  bucket keys) happens in JS so there is a single source of local time —
+  SQLite's own `localtime` modifier uses libc and can disagree with the JS
+  engine's timezone. The schema:
 
 ```sql
 events(id, ts, direction CHECK IN ('fwd','rev'), class, confidence,
@@ -111,5 +119,5 @@ crossings recorded offline upload when connectivity returns.
 ## Privacy
 
 Video frames never leave the browser. The server stores only numeric crossing
-events. There is no tracking, no third-party requests after `npm run setup`
+events. There is no tracking, no third-party requests after `bun run setup`
 (with vendored model), and the whole system runs air-gapped.

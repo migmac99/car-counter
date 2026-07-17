@@ -4,7 +4,7 @@
  * is fully self-hosted (and works offline as a PWA). Without these files the
  * frontend transparently falls back to loading them from CDN/Google storage.
  *
- * Usage: npm run setup   (add --force to re-download)
+ * Usage: bun run setup   (add --force to re-download)
  */
 import { mkdir, writeFile, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';

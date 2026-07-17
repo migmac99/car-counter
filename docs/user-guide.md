@@ -2,7 +2,8 @@
 
 ## Requirements
 
-- Node.js **≥ 22.5** (the server uses the built-in SQLite module)
+- [Bun](https://bun.sh) **≥ 1.1** (`curl -fsSL https://bun.sh/install | bash`
+  or `brew install bun`)
 - A browser with WebGL (any current Chrome/Edge/Safari/Firefox)
 - A webcam with a view of the road — street-level or moderately elevated
   side views work best (avoid straight-down overhead angles; see
@@ -11,11 +12,11 @@
 ## Install & run
 
 ```sh
-npm run setup   # one-time, optional but recommended: self-host the ML model (~16 MB)
-npm start       # http://localhost:3000   (PORT=8080 npm start to change)
+bun run setup   # one-time, optional but recommended: self-host the ML model (~16 MB)
+bun start       # http://localhost:3000   (PORT=8080 bun start to change)
 ```
 
-Without `npm run setup` the browser loads the model from CDN instead — fine
+Without `bun run setup` the browser loads the model from CDN instead — fine
 online, but the PWA then needs connectivity on first use.
 
 ## Counting cars
@@ -86,7 +87,7 @@ HTTP from any device — only the camera needs the secure context.
 | Symptom | Fix |
 |---|---|
 | "camera unavailable" | Grant camera permission; make sure the page is on localhost or HTTPS; close other apps using the camera |
-| "model failed to load" | Run `npm run setup` on the server, or check connectivity for the CDN fallback |
+| "model failed to load" | Run `bun run setup` on the server, or check connectivity for the CDN fallback |
 | Nothing gets detected | Check the viewpoint (avoid overhead angles), raise camera resolution, lower Min confidence, make sure vehicles are reasonably large in frame |
 | Cars counted twice | Raise Min confidence; draw the line where traffic doesn't stop on it; the built-in hysteresis+cooldown handles normal jitter |
 | Counts missed | Line too close to the frame edge (tracks need ≥ 3 detections before counting); occlusion in dense traffic; try a cleaner stretch of road |

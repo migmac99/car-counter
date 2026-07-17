@@ -5,7 +5,7 @@ Point a camera at a road, draw a counting line across it, and get live and
 historical counts of cars (and trucks, buses, motorcycles) per direction.
 
 Detection and tracking run **entirely in the browser** with TensorFlow.js —
-video never leaves the device. A small zero-dependency Node server stores
+video never leaves the device. A small zero-dependency Bun server stores
 crossing events in SQLite and serves aggregated statistics.
 
 ## Features
@@ -19,16 +19,16 @@ crossing events in SQLite and serves aggregated statistics.
 - **History** — minute/hour/day buckets with charts and a table view
 - **Installable PWA** that keeps working offline (model included)
 - **Video-file mode** — analyze recorded footage instead of a live camera
-- **Zero npm dependencies** — Node 22 built-ins only (`node:http`, `node:sqlite`)
+- **Zero npm dependencies** — [Bun](https://bun.sh) built-ins only (`Bun.serve`, `bun:sqlite`)
 
 ## Quickstart
 
-Requires Node.js ≥ 22.5.
+Requires Bun ≥ 1.1 (`curl -fsSL https://bun.sh/install | bash` or `brew install bun`).
 
 ```sh
-npm run setup   # one-time: download the ML runtime + model (~16 MB) for self-hosting
-npm start       # serve on http://localhost:3000
-npm test        # run the unit + integration test suite
+bun run setup   # one-time: download the ML runtime + model (~16 MB) for self-hosting
+bun start       # serve on http://localhost:3000
+bun test        # run the unit + integration test suite
 ```
 
 Open <http://localhost:3000>, click **Start camera**, then **Set counting line**
@@ -36,7 +36,7 @@ and click two points across the road. The arrow shows which crossing direction
 counts as *forward*. That's it — counts persist across restarts.
 
 `PORT` and `HOST` environment variables override the defaults. Skipping
-`npm run setup` also works — the app then loads the model from CDN.
+`bun run setup` also works — the app then loads the model from CDN.
 
 ## Documentation
 
