@@ -123,29 +123,50 @@ export const routes = {
     const stream = new ReadableStream({
       start(controller) {
         let lastSeq = -1;
+        let lastJpeg = null;
+        let lastSentAt = Date.now();
+        let stoppedSince = null;
         let sending = false;
+        const part = (jpeg) =>
+          Buffer.concat([
+            Buffer.from(
+              `--${BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpeg.length}\r\n\r\n`
+            ),
+            jpeg,
+            Buffer.from('\r\n'),
+          ]);
+        const shutdown = () => {
+          clearInterval(timer);
+          try {
+            controller.close();
+          } catch {}
+        };
         timer = setInterval(async () => {
           if (sending) return;
           sending = true;
           try {
+            // Close gracefully once the engine has been off for a while; the
+            // client falls back / resubscribes on its next engine-mode entry.
+            if (!engine.status.running) {
+              stoppedSince ??= Date.now();
+              if (Date.now() - stoppedSince > 5000) shutdown();
+              return;
+            }
+            stoppedSince = null;
             const frame = await engine.previewFrame(lastSeq);
             if (frame) {
               lastSeq = frame.seq;
-              controller.enqueue(
-                Buffer.concat([
-                  Buffer.from(
-                    `--${BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.jpeg.length}\r\n\r\n`
-                  ),
-                  frame.jpeg,
-                  Buffer.from('\r\n'),
-                ])
-              );
+              lastJpeg = frame.jpeg;
+              lastSentAt = Date.now();
+              controller.enqueue(part(frame.jpeg));
+            } else if (lastJpeg && Date.now() - lastSentAt > 4000) {
+              // Heartbeat: re-send the last frame so the connection never
+              // idles out during capture stalls (permission prompt, retry).
+              lastSentAt = Date.now();
+              controller.enqueue(part(lastJpeg));
             }
           } catch {
-            clearInterval(timer);
-            try {
-              controller.close();
-            } catch {}
+            shutdown();
           } finally {
             sending = false;
           }

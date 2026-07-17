@@ -120,6 +120,10 @@ export function startServer({
     port,
     hostname,
     maxRequestBodySize: MAX_BODY_BYTES,
+    // Long-lived responses (the MJPEG preview stream) must survive quiet
+    // spells — e.g. while ffmpeg waits behind the macOS camera-permission
+    // prompt. Bun's default of 10 s killed them. 255 is Bun's maximum.
+    idleTimeout: 255,
     fetch: app.fetch,
   });
   return { server, store: app.store, engine: app.engine };

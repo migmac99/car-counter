@@ -822,12 +822,34 @@ function applyEngineUi() {
   }
 }
 
+let lastEngineError = null;
+
 async function pollEngine() {
   try {
     const next = await fetchEngine();
     const changed = Boolean(next.running) !== engineRunning();
     engineStatus = next.available === false ? null : next;
     if (changed) applyEngineUi();
+    // Engine problems must be VISIBLE — a silent retry loop reads as
+    // "nothing works". Camera-permission failures get remediation text.
+    const error = engineStatus?.error ?? null;
+    if (error !== lastEngineError) {
+      lastEngineError = error;
+      if (error) {
+        setStatus(`engine: ${error.slice(0, 80)}`, false);
+        refs.status.classList.add('warn');
+        if (/capture|camera|avfoundation|permission/i.test(error)) {
+          refs.videoHint.hidden = false;
+          refs.videoHint.textContent =
+            'The server cannot read the camera. On macOS, grant camera access to the terminal ' +
+            'that runs the server (System Settings → Privacy & Security → Camera), then try again. ' +
+            'Check the camera choice under Settings → Engine camera.';
+        }
+      } else {
+        refs.status.classList.remove('warn');
+        if (engineRunning()) applyEngineUi();
+      }
+    }
   } catch {}
 }
 
@@ -1060,6 +1082,11 @@ if ('serviceWorker' in navigator) {
     refs.engineSettings.hidden = false;
     setInterval(pollEngine, 300);
     applyEngineUi();
+    if (!engineRunning()) {
+      refs.videoHint.textContent =
+        'Click “Start server counting” — the server captures and counts by itself ' +
+        '(keeps going with the browser closed). Or start a browser camera below.';
+    }
     // Camera list as seen by the SERVER (the engine captures, not this page).
     try {
       const { devices } = await (await fetch('/api/engine/devices')).json();
