@@ -197,6 +197,11 @@ button.danger { color: var(--danger); }
   font-variant-numeric: tabular-nums;
 }
 
+.num { width: 4.5rem; font: inherit; font-size: 0.85rem; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.3rem 0.4rem; }
+.danger-value { color: var(--danger); }
+.chart-speed { min-height: 120px; }
+.speed-title { margin-top: 0.9rem; }
+
 .settings { margin-top: 0.7rem; font-size: 0.85rem; }
 .settings summary { cursor: pointer; color: var(--ink-2); }
 .settings-body {

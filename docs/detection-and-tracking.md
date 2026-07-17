@@ -70,9 +70,31 @@ Per confirmed track, per frame:
 4. **Cooldown** (2 s per track) absorbs oscillation right after a count while
    still allowing a genuine return trip to count as `rev`.
 
-Each crossing emits `{ts, direction, class, confidence, trackId}` — queued in
-localStorage and POSTed in batches; the queue survives reloads and offline
-periods.
+Each crossing emits `{ts, direction, class, confidence, trackId, line}` —
+queued in localStorage and POSTed in batches; the queue survives reloads and
+offline periods.
+
+## 5. Speed — `speed.js`
+
+When two lines are configured as **speed gates** with a known real-world
+separation, a vehicle's speed is `distance ÷ (t₂ − t₁)` between its two gate
+crossings. Timing-based measurement is deliberately chosen over
+pixels-per-frame velocity: it needs no camera calibration and is unaffected
+by perspective foreshortening. Systematic latencies (detector lag, centroid
+smoothing) hit both gate timestamps equally and cancel; the residual error
+is crossing-detection granularity (~1 frame per gate), so accuracy improves
+with gate separation — aim for ≥ 1.5 s of travel between gates. Implausible
+intervals (< 150 ms or > 2 min) are discarded. Verified against a synthetic
+46.8 km/h vehicle: measured 46.1 km/h (−1.5 %).
+
+## Auto-detected roads
+
+"Auto-detect road" builds its suggestion from observed motion, not image
+segmentation: confirmed track trajectories vote on a dominant travel axis
+(double-angle circular mean, so opposing directions reinforce rather than
+cancel), and the trajectory band — expanded by 20 % — becomes the road zone,
+with a counting line placed across the middle. It needs ≥ 3 vehicles with
+meaningful displacement and gives up after 30 s of quiet road.
 
 ## Tuning reference
 

@@ -172,7 +172,9 @@ export class Overlay {
       ctx.stroke();
     }
     if (t.confirmed) {
-      this.#label(`${t.class} #${t.id}`, x, y - 6 * scale, TRACK_COLOR, scale);
+      const speed = t.kmh != null ? ` · ${t.kmh} km/h` : '';
+      const color = t.over ? '#f87171' : TRACK_COLOR;
+      this.#label(`${t.class} #${t.id}${speed}`, x, y - 6 * scale, color, scale);
     }
   }
 

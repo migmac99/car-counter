@@ -15,6 +15,7 @@ import {
   deletePreset,
 } from './api.js';
 import { StatsUi } from './stats-ui.js';
+import { SpeedMatcher } from './speed.js';
 import { pointInPolygon, boxCenter } from './geometry.js';
 
 const $ = (id) => document.getElementById(id);
@@ -31,9 +32,15 @@ const refs = {
   stopBtn: $('stop-btn'),
   fileInput: $('file-input'),
   drawLineBtn: $('draw-line-btn'),
+  addLanesBtn: $('add-lanes-btn'),
   flipBtn: $('flip-btn'),
   drawRoiBtn: $('draw-roi-btn'),
+  autoRoadBtn: $('auto-road-btn'),
   deleteShapeBtn: $('delete-shape-btn'),
+  gateA: $('gate-a'),
+  gateB: $('gate-b'),
+  gateMeters: $('gate-meters'),
+  speedLimit: $('speed-limit'),
   zoom: $('zoom'),
   zoomValue: $('zoom-value'),
   minScore: $('min-score'),
@@ -54,6 +61,12 @@ const refs = {
   tileHour: $('tile-hour'),
   tileToday: $('tile-today'),
   tileTotal: $('tile-total'),
+  tileSpeed: $('tile-speed'),
+  tileSpeedWrap: $('tile-speed-wrap'),
+  tileOver: $('tile-over'),
+  tileOverWrap: $('tile-over-wrap'),
+  speedHistory: $('speed-history'),
+  speedChart: $('speed-chart'),
   dirFwd: $('dir-fwd'),
   dirRev: $('dir-rev'),
   sparkline: $('sparkline'),
@@ -75,6 +88,7 @@ const state = {
   cameraId: '',
   wasRunning: false, // camera was live when the page last closed
   historyView: null, // {bucket, rangeMs}
+  speed: { gateA: '', gateB: '', meters: 0, limitKmh: 0 },
 };
 
 const detector = new Detector();
@@ -82,6 +96,7 @@ const tracker = new Tracker();
 const counters = new Map(); // line id -> LineCounter
 const overlay = new Overlay(refs.overlay);
 const sink = new EventSink();
+const speedMatcher = new SpeedMatcher();
 let statsUi = null; // constructed in boot, after the saved config is loaded
 
 function setStatus(text, running = state.running) {
@@ -119,8 +134,44 @@ function adoptShapes(px) {
   state.lines = px.lines.map((l) => ({ id: l.id, a: toNorm(l.a), b: toNorm(l.b) }));
   state.zones = px.zones.map((z) => ({ id: z.id, points: z.points.map(toNorm) }));
   syncCounters();
+  refreshGateOptions();
   persistConfig();
   setStatus(state.running ? (state.lines.length ? 'counting' : 'running — add a counting line') : refs.status.textContent);
+}
+
+// --- speed gates ---
+function refreshGateOptions() {
+  for (const [sel, chosen] of [
+    [refs.gateA, state.speed.gateA],
+    [refs.gateB, state.speed.gateB],
+  ]) {
+    sel.innerHTML =
+      '<option value="">—</option>' +
+      state.lines.map((l, i) => `<option value="${l.id}">L${i + 1}</option>`).join('');
+    sel.value = state.lines.some((l) => l.id === chosen) ? chosen : '';
+  }
+}
+
+function applySpeedConfig() {
+  speedMatcher.configure(state.speed);
+  refs.gateMeters.value = state.speed.meters || '';
+  refs.speedLimit.value = state.speed.limitKmh || '';
+  refreshGateOptions();
+}
+
+function onSpeedSettingsChange() {
+  state.speed = {
+    gateA: refs.gateA.value,
+    gateB: refs.gateB.value,
+    meters: Number(refs.gateMeters.value) || 0,
+    limitKmh: Number(refs.speedLimit.value) || 0,
+  };
+  speedMatcher.configure(state.speed);
+  persistConfig();
+  statsUi?.refreshSummary();
+}
+for (const el of ['gateA', 'gateB', 'gateMeters', 'speedLimit']) {
+  refs[el].addEventListener('change', onSpeedSettingsChange);
 }
 
 /** Keep one LineCounter per line; reset crossing state only when geometry moves. */
@@ -161,6 +212,7 @@ function currentConfig() {
     cameraId: state.cameraId,
     wasRunning: state.wasRunning,
     historyView: state.historyView,
+    speed: { ...state.speed },
   };
 }
 
@@ -192,6 +244,8 @@ function applyConfig(config) {
   state.cameraId = config.cameraId ?? '';
   state.wasRunning = config.wasRunning ?? false;
   state.historyView = config.historyView ?? null;
+  state.speed = { gateA: '', gateB: '', meters: 0, limitKmh: 0, ...config.speed };
+  applySpeedConfig();
   refs.minScore.value = state.minScore;
   refs.minScoreValue.textContent = state.minScore.toFixed(2);
   refs.countModeSel.value = state.countMode;
@@ -304,6 +358,88 @@ const editor = new ShapeEditor(refs.overlay, {
   getView: viewRect,
 });
 
+// --- auto-detect road ---
+// Watches confirmed track trajectories for a few seconds, then derives the
+// dominant travel axis (double-angle mean handles two-way traffic), a road
+// zone around the observed motion band, and a counting line across it.
+let autoRoad = null; // { paths: Map(trackId -> points), startedAt }
+
+refs.autoRoadBtn.addEventListener('click', () => {
+  if (autoRoad) {
+    autoRoad = null;
+    refs.autoRoadBtn.classList.remove('active');
+    setStatus(state.running ? 'counting' : 'stopped');
+    return;
+  }
+  if (!requireVideo() || !state.running) {
+    setStatus('start a camera or video first', false);
+    return;
+  }
+  autoRoad = { paths: new Map(), startedAt: Date.now() };
+  refs.autoRoadBtn.classList.add('active');
+  setStatus('mapping the road — let some traffic pass…');
+});
+
+function collectAutoRoad(tracks) {
+  const { w, h } = videoSize();
+  for (const t of tracks) {
+    if (!t.confirmed) continue;
+    // Track full lifetime displacement (the history buffer is a short window).
+    const path = autoRoad.paths.get(t.id) ?? { first: { x: t.cx, y: t.cy }, pts: [] };
+    path.last = { x: t.cx, y: t.cy };
+    if (path.pts.length < 400) path.pts.push(path.last);
+    autoRoad.paths.set(t.id, path);
+  }
+  const minTravel = Math.hypot(w, h) * 0.1;
+  const moves = [...autoRoad.paths.values()]
+    .map((p) => ({ dx: p.last.x - p.first.x, dy: p.last.y - p.first.y }))
+    .filter((d) => Math.hypot(d.dx, d.dy) >= minTravel);
+  const elapsed = Date.now() - autoRoad.startedAt;
+  if (moves.length >= 3 && elapsed > 4000) {
+    finishAutoRoad(moves);
+  } else if (elapsed > 30_000) {
+    autoRoad = null;
+    refs.autoRoadBtn.classList.remove('active');
+    setStatus('no traffic seen in 30 s — draw the road manually');
+  }
+}
+
+function finishAutoRoad(moves) {
+  const { w, h } = videoSize();
+  // Dominant travel axis via the double-angle trick (opposing directions agree).
+  let c2 = 0;
+  let s2 = 0;
+  for (const m of moves) {
+    const th = Math.atan2(m.dy, m.dx);
+    c2 += Math.cos(2 * th);
+    s2 += Math.sin(2 * th);
+  }
+  const axis = Math.atan2(s2, c2) / 2;
+  const u = { x: Math.cos(axis), y: Math.sin(axis) };
+  const v = { x: -u.y, y: u.x };
+  const pts = [...autoRoad.paths.values()].flatMap((p) => p.pts);
+  const us = pts.map((p) => p.x * u.x + p.y * u.y);
+  const vs = pts.map((p) => p.x * v.x + p.y * v.y);
+  const [u0, u1] = [Math.min(...us), Math.max(...us)];
+  let [v0, v1] = [Math.min(...vs), Math.max(...vs)];
+  const vm = Math.max(12, (v1 - v0) * 0.2);
+  v0 -= vm;
+  v1 += vm;
+  const clamp = (p) => ({ x: Math.min(w, Math.max(0, p.x)), y: Math.min(h, Math.max(0, p.y)) });
+  const at = (uu, vv) => clamp({ x: uu * u.x + vv * v.x, y: uu * u.y + vv * v.y });
+  const id = (prefix) => `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
+
+  const px = shapesToPixels();
+  px.zones.push({ id: id('zone'), points: [at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)] });
+  const mid = (u0 + u1) / 2;
+  px.lines.push({ id: id('line'), a: at(mid, v0), b: at(mid, v1) });
+  editor.setShapes(px);
+  adoptShapes(px);
+  autoRoad = null;
+  refs.autoRoadBtn.classList.remove('active');
+  setStatus('road mapped — adjust the zone and line as needed');
+}
+
 // --- detection loop ---
 let detecting = false;
 
@@ -332,10 +468,17 @@ async function step(now) {
       : detections;
     const tracks = tracker.update(inZone, now);
     const liveIds = new Set(tracks.map((t) => t.id));
+    if (autoRoad) collectAutoRoad(tracks);
     for (const [lineId, counter] of counters) {
       const crossings = counter.update(tracks, now);
       counter.prune(liveIds);
       for (const c of crossings) {
+        const track = tracks.find((t) => t.id === c.trackId);
+        const measured = speedMatcher.observe(c.trackId, lineId, c.ts);
+        if (measured && track) {
+          track.kmh = measured.kmh;
+          track.over = measured.over;
+        }
         sink.record({
           ts: c.ts,
           direction: c.direction,
@@ -343,12 +486,13 @@ async function step(now) {
           confidence: Math.round(c.confidence * 1000) / 1000,
           trackId: c.trackId,
           line: lineId,
+          ...(measured ? { speed: measured.kmh, over: measured.over } : {}),
         });
         statsUi?.bump(c.direction);
-        const track = tracks.find((t) => t.id === c.trackId);
         if (track) overlay.addPulse(track.cx, track.cy, c.direction);
       }
     }
+    speedMatcher.prune(liveIds);
   } finally {
     detecting = false;
   }
@@ -443,6 +587,17 @@ function requireVideo() {
 refs.drawLineBtn.addEventListener('click', () => {
   if (editor.mode === 'line') editor.cancel();
   else if (requireVideo()) editor.start('line');
+});
+refs.addLanesBtn.addEventListener('click', () => {
+  if (editor.mode === 'line') {
+    editor.cancel();
+    return;
+  }
+  if (!requireVideo()) return;
+  const n = Number(prompt('How many lanes? Draw ONE line across the whole road; it will be split into per-lane counting lines.', '2'));
+  if (!Number.isInteger(n) || n < 2 || n > 12) return;
+  editor.laneSplit = n;
+  editor.start('line');
 });
 refs.drawRoiBtn.addEventListener('click', () => {
   if (editor.mode === 'zone') editor.cancel();
@@ -582,6 +737,7 @@ if ('serviceWorker' in navigator) {
       state.historyView = { bucket, rangeMs };
       persistConfig();
     },
+    speedInfo: () => ({ active: speedMatcher.active, limitKmh: speedMatcher.limitKmh }),
   });
   refreshPresets();
   refreshCameraList();

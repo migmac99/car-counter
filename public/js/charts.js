@@ -223,6 +223,83 @@ export function renderSparkline(container, buckets, formatLabel) {
   container.append(svg);
 }
 
+/**
+ * Average-speed line over history buckets (gaps where no measurement), with
+ * an optional speed-limit reference hairline. Same x-domain as the bars.
+ * @param {Array} buckets [{ ts, avgKmh, over }]
+ */
+export function renderSpeedLine(container, buckets, formatLabel, limitKmh = 0) {
+  container.querySelector('svg')?.remove();
+  const width = Math.max(container.clientWidth, 320);
+  const height = 130;
+  const plotW = width - MARGIN.l - MARGIN.r;
+  const plotH = height - MARGIN.t - MARGIN.b;
+  const svg = el('svg', { viewBox: `0 0 ${width} ${height}`, width, height, role: 'img' });
+  const tip = tooltipFor(container);
+
+  const values = buckets.map((b) => b.avgKmh).filter((v) => v != null);
+  const yMax = niceMax(Math.max(limitKmh, 0, ...values));
+  grid(svg, plotW, plotH, yMax, 3);
+
+  const n = buckets.length;
+  const step = plotW / Math.max(1, n);
+  const xOf = (i) => MARGIN.l + i * step + step / 2;
+  const yOf = (v) => MARGIN.t + plotH - (v / yMax) * plotH;
+
+  if (limitKmh > 0) {
+    svg.append(el('line', {
+      x1: MARGIN.l, x2: MARGIN.l + plotW, y1: yOf(limitKmh), y2: yOf(limitKmh),
+      stroke: 'var(--danger)', 'stroke-width': 1, 'stroke-dasharray': '5 4',
+    }));
+    const lbl = el('text', {
+      x: MARGIN.l + plotW, y: yOf(limitKmh) - 4, 'text-anchor': 'end',
+      fill: 'var(--danger)', 'font-size': 10,
+    });
+    lbl.textContent = `limit ${limitKmh}`;
+    svg.append(lbl);
+  }
+
+  // Line with gaps where no vehicle was measured
+  let d = '';
+  let pen = false;
+  buckets.forEach((b, i) => {
+    if (b.avgKmh == null) {
+      pen = false;
+      return;
+    }
+    d += `${pen ? 'L' : 'M'}${xOf(i)},${yOf(b.avgKmh)} `;
+    pen = true;
+  });
+  svg.append(el('path', {
+    d: d.trim(), fill: 'none', stroke: 'var(--series-fwd)', 'stroke-width': 2,
+    'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+  }));
+  // Mark buckets with over-limit vehicles
+  buckets.forEach((b, i) => {
+    if (b.avgKmh != null && b.over > 0) {
+      svg.append(el('circle', { cx: xOf(i), cy: yOf(b.avgKmh), r: 4, fill: 'var(--danger)', stroke: 'var(--surface)', 'stroke-width': 2 }));
+    }
+  });
+
+  buckets.forEach((b, i) => {
+    if (b.avgKmh == null) return;
+    const hover = el('rect', { x: MARGIN.l + i * step, y: MARGIN.t, width: step, height: plotH, class: 'hover-col' });
+    hover.addEventListener('pointerenter', () => {
+      tip.show(
+        xOf(i),
+        yOf(b.avgKmh),
+        `<div class="tt-title">${formatLabel(b.ts)}</div>` +
+          `<div class="tt-row">avg <b>${b.avgKmh} km/h</b></div>` +
+          (b.over > 0 ? `<div class="tt-row">over limit <b>${b.over}</b></div>` : '')
+      );
+    });
+    hover.addEventListener('pointerleave', tip.hide);
+    svg.append(hover);
+  });
+
+  container.append(svg);
+}
+
 /** Accessible table view of the same history buckets (most recent first). */
 export function renderTable(container, buckets, formatLabel, cap = 120) {
   const rows = buckets.filter((b) => b.total > 0).reverse().slice(0, cap);

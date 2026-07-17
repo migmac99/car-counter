@@ -26,6 +26,8 @@ request, body limit 512 KB).
       "confidence": 0.91,         // optional — 0..1
       "trackId": 17,              // optional — integer, for debugging
       "line": "line-3f9a2b",      // optional — id of the counting line that fired (≤ 64 chars)
+      "speed": 46.1,              // optional — measured km/h (0 < speed < 400)
+      "over": true,               // optional — speed exceeded the configured limit
       "source": "default"         // optional — camera/site label (≤ 64 chars)
     }
   ]
@@ -49,6 +51,10 @@ Live counters, each split by direction:
   "lastHour":  { "total": 40, "fwd": 22, "rev": 18 },
   "today":     { "total": 310, "fwd": 160, "rev": 150 },
   "allTime":   { "total": 51234, "fwd": 26410, "rev": 24824 },
+  "speed": {
+    "last5Min": { "n": 9, "avgKmh": 43.5, "maxKmh": 61.2, "over": 2 },
+    "today":    { "n": 310, "avgKmh": 41.0, "maxKmh": 84.9, "over": 17 }
+  },
   "firstEventTs": 1780000000000,
   "lastEventTs": 1784292999000,
   "totalEvents": 51234
@@ -73,10 +79,14 @@ Zero-filled, time-bucketed counts (server-local time). Defaults and caps:
   "from": 1784289400000,
   "to": 1784293000000,
   "buckets": [
-    { "key": "2026-07-17T13:56", "ts": 1784292960000, "fwd": 2, "rev": 1, "total": 3 }
+    { "key": "2026-07-17T13:56", "ts": 1784292960000, "fwd": 2, "rev": 1, "total": 3,
+      "avgKmh": 44.7, "over": 1 }
   ]
 }
 ```
+
+`avgKmh` is null in buckets with no speed-measured vehicles; `over` counts
+vehicles that exceeded the limit in force when they were measured.
 
 `ts` is the bucket's start (epoch ms); `key` is its local-time label.
 

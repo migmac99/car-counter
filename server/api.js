@@ -21,6 +21,8 @@ function validateEvent(e, now) {
   if (e.confidence != null && !(e.confidence >= 0 && e.confidence <= 1)) return 'invalid confidence';
   if (e.trackId != null && !Number.isInteger(e.trackId)) return 'invalid trackId';
   if (e.line != null && (typeof e.line !== 'string' || e.line.length > 64)) return 'invalid line';
+  if (e.speed != null && !(e.speed > 0 && e.speed < 400)) return 'invalid speed';
+  if (e.over != null && typeof e.over !== 'boolean') return 'invalid over';
   if (e.source != null && (typeof e.source !== 'string' || e.source.length > 64)) return 'invalid source';
   return null;
 }

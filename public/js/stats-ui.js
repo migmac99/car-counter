@@ -1,5 +1,5 @@
 import { fetchSummary, fetchHistory } from './api.js';
-import { renderStackedBars, renderSparkline, renderTable } from './charts.js';
+import { renderStackedBars, renderSparkline, renderSpeedLine, renderTable } from './charts.js';
 
 const SUMMARY_POLL_MS = 4000;
 const HISTORY_POLL_MS = 15_000;
@@ -45,10 +45,11 @@ export class StatsUi {
   #rangeMs = RANGES.minute[0][1];
   #lastHistory = null;
 
-  constructor(refs, countMode, { initial, onViewChange } = {}) {
+  constructor(refs, countMode, { initial, onViewChange, speedInfo } = {}) {
     this.refs = refs;
     this.countMode = countMode;
     this.onViewChange = onViewChange;
+    this.speedInfo = speedInfo ?? (() => ({ active: false, limitKmh: 0 }));
 
     refs.bucketSeg.addEventListener('click', (e) => {
       const btn = e.target.closest('button[data-bucket]');
@@ -130,6 +131,14 @@ export class StatsUi {
     refs.tileTotal.textContent = this.#counts(s.allTime);
     refs.dirFwd.textContent = s.today.fwd;
     refs.dirRev.textContent = s.today.rev;
+
+    const speedActive = this.speedInfo().active;
+    refs.tileSpeedWrap.hidden = !speedActive;
+    refs.tileOverWrap.hidden = !speedActive;
+    if (speedActive && s.speed) {
+      refs.tileSpeed.textContent = s.speed.last5Min.avgKmh ?? '–';
+      refs.tileOver.textContent = s.speed.today.over;
+    }
   }
 
   async refreshHistory() {
@@ -150,7 +159,12 @@ export class StatsUi {
   #rerenderHistory() {
     if (!this.#lastHistory) return;
     const fmt = labelFormatter(this.#bucket, this.#rangeMs);
-    renderStackedBars(this.refs.historyChart, this.#lastHistory.buckets, fmt);
-    renderTable(this.refs.historyTable, this.#lastHistory.buckets, fmt);
+    const buckets = this.#lastHistory.buckets;
+    renderStackedBars(this.refs.historyChart, buckets, fmt);
+    renderTable(this.refs.historyTable, buckets, fmt);
+    const { active, limitKmh } = this.speedInfo();
+    const hasSpeed = active && buckets.some((b) => b.avgKmh != null);
+    this.refs.speedHistory.hidden = !hasSpeed;
+    if (hasSpeed) renderSpeedLine(this.refs.speedChart, buckets, fmt, limitKmh);
   }
 }

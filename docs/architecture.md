@@ -71,7 +71,8 @@ unit-tested in Node directly.
 | `counter.js` | Directional line-crossing detection (one instance per line) |
 | `geometry.js` | Shared 2D math (side-of-line, segment intersection, IoU, …) |
 | `overlay.js` | Crisp canvas rendering through the zoom transform: boxes, trails, lines + arrows, zones, handles, pulses |
-| `zones.js` | `ShapeEditor` — draw/select/move/reshape/delete lines & zones, pan while zoomed |
+| `zones.js` | `ShapeEditor` — draw/select/move/reshape/delete lines & zones, lane splitting, pan while zoomed |
+| `speed.js` | `SpeedMatcher` — per-vehicle speed from timed gate-pair crossings |
 | `api.js` | Server client, presets, offline event queue (localStorage) |
 | `stats-ui.js` | Live tiles, polling, history controls |
 | `charts.js` | Dependency-free SVG charts (stacked bars, sparkline, table) |

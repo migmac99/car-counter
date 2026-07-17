@@ -17,6 +17,13 @@ crossing events in SQLite and serves aggregated statistics.
 - **Multiple detection zones** — polygons that restrict where detection looks
 - **Full shape editing** — click to select, drag to move, drag handles to
   reshape/rotate, Delete to remove, flip a line's direction
+- **Lane mode** — draw one line across the road, say how many lanes: it
+  splits into per-lane counting lines
+- **Auto-detect road** — watches passing traffic for a few seconds, then
+  suggests the road zone and a counting line automatically
+- **Speed measurement** — two gate lines a known distance apart give
+  per-vehicle speeds (perspective-robust timing method); set a speed limit
+  and see over-limit counts in the stats and an average-speed chart
 - **Digital zoom up to 10×** with drag-to-pan — detection runs on the zoomed
   crop, so zooming genuinely improves recall on distant traffic
 - **Named presets** (stored server-side) plus config **export/import** as JSON

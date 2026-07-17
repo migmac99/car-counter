@@ -44,7 +44,9 @@
         <button id="stop-btn" disabled>Stop</button>
         <span class="spacer"></span>
         <button id="draw-line-btn" title="Click two points across the road; each line counts separately">Add line</button>
+        <button id="add-lanes-btn" title="Draw one line across the whole road and split it into per-lane counting lines">Add lanes…</button>
         <button id="draw-roi-btn" title="Click points around an area to watch; double-click to close. Detections outside all zones are ignored">Add zone</button>
+        <button id="auto-road-btn" title="Watch passing traffic for a few seconds, then suggest a road zone and counting line automatically">Auto-detect road</button>
         <button id="flip-btn" title="Swap which crossing direction of the selected line is 'forward'">Flip direction</button>
         <button id="delete-shape-btn" disabled title="Remove the selected line or zone (or press Delete)">Remove selected</button>
         <label class="zoom-ctl" title="Digital zoom — detection runs on the zoomed region; drag the video to pan">
@@ -74,6 +76,15 @@
               <option value="rev">reverse only</option>
             </select>
           </label>
+          <div class="group" id="speed-settings">
+            <label>Speed gates
+              <select id="gate-a" title="First gate line"></select>
+              →
+              <select id="gate-b" title="Second gate line"></select>
+            </label>
+            <label>distance <input id="gate-meters" type="number" min="1" max="2000" step="0.5" class="num" /> m</label>
+            <label>limit <input id="speed-limit" type="number" min="0" max="300" step="5" class="num" /> km/h</label>
+          </div>
           <div class="group">
             <label>Preset
               <select id="preset-select">
@@ -117,6 +128,14 @@
           <div class="tile-value" id="tile-total">–</div>
           <div class="tile-label">all time</div>
         </div>
+        <div class="tile" id="tile-speed-wrap" hidden>
+          <div class="tile-value" id="tile-speed">–</div>
+          <div class="tile-label">avg km/h · last 5 min</div>
+        </div>
+        <div class="tile" id="tile-over-wrap" hidden>
+          <div class="tile-value danger-value" id="tile-over">–</div>
+          <div class="tile-label">over limit · today</div>
+        </div>
       </div>
       <div class="direction-split">
         <span><span class="chip chip-fwd"></span>forward <b id="dir-fwd">0</b></span>
@@ -143,6 +162,10 @@
       <div class="legend">
         <span><i class="chip chip-fwd"></i>forward (with arrow)</span>
         <span><i class="chip chip-rev"></i>reverse (against arrow)</span>
+      </div>
+      <div id="speed-history" hidden>
+        <h3 class="speed-title">Average speed · km/h</h3>
+        <div id="speed-chart" class="chart chart-speed"></div>
       </div>
       <details class="table-details">
         <summary>Table view</summary>

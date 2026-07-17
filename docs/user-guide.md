@@ -37,6 +37,38 @@ online, but the PWA then needs connectivity on first use.
 4. Watch the overlay: white boxes are tracked vehicles with IDs, blue trails
    show their paths, and a pulse marks each count.
 
+### Lanes and auto-detection
+
+- **Add lanes…** asks how many lanes the road has, then lets you draw ONE
+  line across the whole road — it is split into that many per-lane counting
+  lines (with small gaps so one car can't fire two lanes). Flip individual
+  lanes afterwards for two-way roads.
+- **Auto-detect road** gets you started without drawing: it watches passing
+  traffic for a few seconds (at least three vehicles), infers the dominant
+  travel axis from their trajectories, and creates a road zone plus a
+  counting line perpendicular to travel. Adjust the shapes afterwards —
+  it's a starting point, not a survey.
+
+### Measuring speed
+
+Speed uses two **gate lines** a known real-world distance apart (the
+distance between two road markings, lamp posts, etc. — measure it or read
+it off satellite imagery). In **Settings → Speed gates** pick the two lines,
+enter the distance in meters and optionally a speed limit:
+
+- Each vehicle that crosses both gates gets a speed
+  (distance ÷ time between crossings — robust to camera perspective) shown
+  on its overlay label, red when over the limit.
+- The Live panel gains **avg km/h** and **over limit today** tiles, and the
+  History panel gains an average-speed chart with the limit drawn as a
+  reference line and over-limit buckets marked.
+
+Accuracy depends on the declared distance and on the gates being far enough
+apart that timing granularity doesn't matter (aim for ≥ 1.5 s of travel
+between gates; in verification a synthetic 46.8 km/h vehicle measured
+46.1 km/h). Speeds are indicative — this is not a calibrated enforcement
+instrument.
+
 ### Editing shapes
 
 Click any line or zone to select it (it highlights and shows handles):

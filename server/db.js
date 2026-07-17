@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS events (
   confidence  REAL,
   track_id    INTEGER,
   line        TEXT,
+  speed       REAL,
+  over        INTEGER,
   source      TEXT    NOT NULL DEFAULT 'default',
   received_at INTEGER NOT NULL
 );
@@ -64,13 +66,17 @@ export class Store {
     this.db = new Database(file);
     this.db.exec('PRAGMA journal_mode = WAL;');
     this.db.exec(SCHEMA);
-    // Databases created before multi-line support lack the line column.
+    // Migrate databases created before the multi-line / speed columns existed.
     const columns = this.db.prepare(`PRAGMA table_info(events)`).all().map((c) => c.name);
     if (!columns.includes('line')) this.db.exec(`ALTER TABLE events ADD COLUMN line TEXT`);
+    if (!columns.includes('speed')) {
+      this.db.exec(`ALTER TABLE events ADD COLUMN speed REAL`);
+      this.db.exec(`ALTER TABLE events ADD COLUMN over INTEGER`);
+    }
     this.stmts = {
       insert: this.db.prepare(
-        `INSERT INTO events (ts, direction, class, confidence, track_id, line, source, received_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO events (ts, direction, class, confidence, track_id, line, speed, over, source, received_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ),
       countSince: this.db.prepare(
         `SELECT direction, COUNT(*) AS n FROM events WHERE ts >= ? GROUP BY direction`
@@ -82,9 +88,14 @@ export class Store {
         `SELECT MIN(ts) AS first, MAX(ts) AS last, COUNT(*) AS n FROM events`
       ),
       perMinute: this.db.prepare(
-        `SELECT (ts / 60000) * 60000 AS minute, direction, COUNT(*) AS n
+        `SELECT (ts / 60000) * 60000 AS minute, direction, COUNT(*) AS n,
+                SUM(speed) AS sumSpeed, COUNT(speed) AS nSpeed, SUM(over) AS over
          FROM events WHERE ts >= ? AND ts <= ?
          GROUP BY minute, direction`
+      ),
+      speedSince: this.db.prepare(
+        `SELECT COUNT(speed) AS n, AVG(speed) AS avg, MAX(speed) AS max, SUM(over) AS over
+         FROM events WHERE speed IS NOT NULL AND ts >= ?`
       ),
       getConfig: this.db.prepare(`SELECT value FROM config WHERE key = ?`),
       setConfig: this.db.prepare(
@@ -110,6 +121,8 @@ export class Store {
           e.confidence ?? null,
           e.trackId ?? null,
           e.line ?? null,
+          e.speed ?? null,
+          e.speed != null ? (e.over ? 1 : 0) : null,
           e.source ?? 'default',
           receivedAt
         );
@@ -127,6 +140,16 @@ export class Store {
     return out;
   }
 
+  #speedWindow(sinceTs) {
+    const row = this.stmts.speedSince.get(sinceTs);
+    return {
+      n: row.n,
+      avgKmh: row.avg == null ? null : Math.round(row.avg * 10) / 10,
+      maxKmh: row.max == null ? null : Math.round(row.max * 10) / 10,
+      over: row.over ?? 0,
+    };
+  }
+
   summary(now = Date.now()) {
     const startOfDay = new Date(now);
     startOfDay.setHours(0, 0, 0, 0);
@@ -140,6 +163,10 @@ export class Store {
       lastHour: since(3600_000),
       today: this.#directionCounts(this.stmts.countSince.all(startOfDay.getTime())),
       allTime: this.#directionCounts(this.stmts.countAll.all()),
+      speed: {
+        last5Min: this.#speedWindow(now - 5 * 60_000),
+        today: this.#speedWindow(startOfDay.getTime()),
+      },
       firstEventTs: bounds.first,
       lastEventTs: bounds.last,
       totalEvents: bounds.n,
@@ -166,16 +193,27 @@ export class Store {
     const byKey = new Map();
     for (const r of this.stmts.perMinute.all(from, to)) {
       const key = bucketKey(r.minute, bucket);
-      const entry = byKey.get(key) ?? { fwd: 0, rev: 0 };
+      const entry = byKey.get(key) ?? { fwd: 0, rev: 0, sumSpeed: 0, nSpeed: 0, over: 0 };
       entry[r.direction] += r.n;
+      entry.sumSpeed += r.sumSpeed ?? 0;
+      entry.nSpeed += r.nSpeed ?? 0;
+      entry.over += r.over ?? 0;
       byKey.set(key, entry);
     }
 
     const buckets = [];
     for (let t = bucketFloor(from, bucket); t <= to; t = nextBucket(t, bucket)) {
       const key = bucketKey(t, bucket);
-      const entry = byKey.get(key) ?? { fwd: 0, rev: 0 };
-      buckets.push({ key, ts: t, fwd: entry.fwd, rev: entry.rev, total: entry.fwd + entry.rev });
+      const e = byKey.get(key) ?? { fwd: 0, rev: 0, sumSpeed: 0, nSpeed: 0, over: 0 };
+      buckets.push({
+        key,
+        ts: t,
+        fwd: e.fwd,
+        rev: e.rev,
+        total: e.fwd + e.rev,
+        avgKmh: e.nSpeed ? Math.round((e.sumSpeed / e.nSpeed) * 10) / 10 : null,
+        over: e.over,
+      });
     }
     return { bucket, from, to, buckets };
   }

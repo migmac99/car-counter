@@ -62,6 +62,9 @@ test('rejects malformed events', async () => {
     [[{ ts: Date.now() + 600_000, direction: 'fwd' }], 'future ts'],
     [[{ ts: Date.now(), direction: 'fwd', confidence: 3 }], 'bad confidence'],
     [[{ ts: Date.now(), direction: 'fwd', line: 'x'.repeat(65) }], 'line too long'],
+    [[{ ts: Date.now(), direction: 'fwd', speed: -3 }], 'negative speed'],
+    [[{ ts: Date.now(), direction: 'fwd', speed: 900 }], 'absurd speed'],
+    [[{ ts: Date.now(), direction: 'fwd', speed: 50, over: 'yes' }], 'non-boolean over'],
   ]) {
     const res = await post('/api/events', { events });
     assert.equal(res.status, 400, `should reject: ${why}`);

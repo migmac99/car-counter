@@ -28,6 +28,7 @@ export class ShapeEditor {
   cursor = null;
   selection = null; // { kind: 'line'|'zone', id, handle: number|null }
   shapes = { lines: [], zones: [] };
+  laneSplit = 0; // when > 1, the next drawn line becomes N per-lane segments
   #drag = null;
 
   constructor(canvas, { onChange, onSelect, onModeChange, onPan, onPanEnd, getView }) {
@@ -223,13 +224,27 @@ export class ShapeEditor {
     this.points.push({ x: p.x, y: p.y });
     if (this.mode === 'line' && this.points.length === 2) {
       const [a, b] = this.points;
+      const lanes = this.laneSplit;
+      this.laneSplit = 0;
       this.cancel();
-      if (Math.hypot(b.x - a.x, b.y - a.y) > 10) {
-        const line = { id: makeId('line'), a, b };
-        this.shapes.lines.push(line);
-        this.#select({ kind: 'line', id: line.id, handle: null });
+      if (Math.hypot(b.x - a.x, b.y - a.y) <= 10) return;
+      if (lanes > 1) {
+        // Split a->b into per-lane segments with small gaps so a crossing
+        // near a shared boundary can't fire two lanes at once.
+        const gap = 0.06 / lanes;
+        for (let i = 0; i < lanes; i++) {
+          const t0 = i / lanes + (i === 0 ? 0 : gap / 2);
+          const t1 = (i + 1) / lanes - (i === lanes - 1 ? 0 : gap / 2);
+          const lerp = (t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+          this.shapes.lines.push({ id: makeId('line'), a: lerp(t0), b: lerp(t1) });
+        }
         this.onChange?.(this.shapes);
+        return;
       }
+      const line = { id: makeId('line'), a, b };
+      this.shapes.lines.push(line);
+      this.#select({ kind: 'line', id: line.id, handle: null });
+      this.onChange?.(this.shapes);
     }
   }
 

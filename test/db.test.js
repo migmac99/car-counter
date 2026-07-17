@@ -76,6 +76,28 @@ test('bucketKey formats local time', () => {
   assert.equal(bucketKey(ts, 'day'), '2026-01-05');
 });
 
+test('speed aggregation in summary and history buckets', () => {
+  const store = freshStore();
+  const now = Date.now();
+  store.insertEvents([
+    { ts: now - 30_000, direction: 'fwd', speed: 40, over: false },
+    { ts: now - 40_000, direction: 'fwd', speed: 60, over: true },
+    { ts: now - 50_000, direction: 'rev' }, // no speed measured
+  ]);
+  const s = store.summary(now);
+  assert.equal(s.speed.last5Min.n, 2);
+  assert.equal(s.speed.last5Min.avgKmh, 50);
+  assert.equal(s.speed.last5Min.maxKmh, 60);
+  assert.equal(s.speed.last5Min.over, 1);
+
+  const h = store.history({ bucket: 'hour', from: now - 3600_000, to: now });
+  const hit = h.buckets.filter((b) => b.total > 0);
+  const withSpeed = hit.find((b) => b.avgKmh != null);
+  assert.equal(withSpeed.avgKmh, 50);
+  assert.equal(withSpeed.over, 1);
+  store.close();
+});
+
 test('config roundtrip and clearEvents', () => {
   const store = freshStore();
   assert.equal(store.getConfig('app'), null);
