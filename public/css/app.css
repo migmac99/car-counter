@@ -1,35 +1,43 @@
-/* Theme tokens (light default, dark via media query). Chart colors follow the
-   validated reference palette: series-1 blue = 'fwd', series-2 green = 'rev'. */
+/* Theme tokens (light default, dark via media query), following the shadcn/ui
+   zinc theme. Chart series use the shadcn chart palette, validated for CVD
+   safety and surface contrast in both modes (dark chart-2 darkened one step,
+   #2eb88a → #2aa87e, to clear the dark-surface lightness band). */
 :root {
   color-scheme: light dark;
-  --page: #f9f9f7;
-  --surface: #fcfcfb;
-  --ink: #0b0b0b;
-  --ink-2: #52514e;
-  --muted: #898781;
-  --grid: #e1e0d9;
-  --baseline: #c3c2b7;
-  --border: rgba(11, 11, 11, 0.1);
-  --series-fwd: #2a78d6;
-  --series-rev: #008300;
-  --accent: #2a78d6;
-  --danger: #d03b3b;
+  --page: #fafafa;
+  --surface: #ffffff;
+  --ink: #09090b;
+  --ink-2: #52525b;
+  --muted: #71717a;
+  --muted-bg: #f4f4f5;
+  --grid: #f4f4f5;
+  --baseline: #d4d4d8;
+  --border: #e4e4e7;
+  --series-fwd: #e76e50;
+  --series-rev: #2a9d90;
+  --accent: #18181b;
+  --accent-fg: #fafafa;
+  --danger: #dc2626;
   --overlay-line: #38bdf8;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.05);
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --page: #0d0d0d;
-    --surface: #1a1a19;
-    --ink: #ffffff;
-    --ink-2: #c3c2b7;
-    --muted: #898781;
-    --grid: #2c2c2a;
-    --baseline: #383835;
+    --page: #09090b;
+    --surface: #18181b;
+    --ink: #fafafa;
+    --ink-2: #d4d4d8;
+    --muted: #a1a1aa;
+    --muted-bg: #27272a;
+    --grid: #27272a;
+    --baseline: #3f3f46;
     --border: rgba(255, 255, 255, 0.1);
-    --series-fwd: #3987e5;
-    --series-rev: #008300;
-    --accent: #3987e5;
-    --danger: #e66767;
+    --series-fwd: #2662d9;
+    --series-rev: #2aa87e;
+    --accent: #fafafa;
+    --accent-fg: #18181b;
+    --danger: #ef4444;
+    --shadow-sm: none;
   }
 }
 
@@ -94,9 +102,10 @@ main {
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 0.625rem;
   padding: 0.9rem;
   min-width: 0;
+  box-shadow: var(--shadow-sm);
 }
 
 /* --- Video area --- */
@@ -143,24 +152,27 @@ select,
 .file-btn {
   font: inherit;
   font-size: 0.85rem;
+  font-weight: 500;
   color: var(--ink);
-  background: var(--page);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 0.35rem 0.7rem;
   cursor: pointer;
+  box-shadow: var(--shadow-sm);
 }
 button:hover:not(:disabled),
-.file-btn:hover { border-color: var(--muted); }
+.file-btn:hover { background: var(--muted-bg); }
 button:disabled { opacity: 0.45; cursor: default; }
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-fg);
 }
+button.primary:hover:not(:disabled) { background: var(--accent); opacity: 0.9; }
 button.active {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--ink);
+  background: var(--muted-bg);
 }
 button.danger { color: var(--danger); }
 .file-btn { display: inline-block; }
@@ -273,22 +285,28 @@ input[type='checkbox'] { accent-color: var(--accent); }
 }
 .history-head h2 { margin-right: auto; }
 
+/* shadcn-style tabs: muted track, active tab lifted onto the surface */
 .seg {
   display: inline-flex;
-  border: 1px solid var(--border);
+  gap: 2px;
+  background: var(--muted-bg);
   border-radius: 8px;
-  overflow: hidden;
+  padding: 3px;
 }
 .seg button {
   border: none;
-  border-radius: 0;
+  border-radius: 6px;
   background: transparent;
-  padding: 0.35rem 0.8rem;
+  box-shadow: none;
+  color: var(--muted);
+  padding: 0.3rem 0.8rem;
 }
-.seg button + button { border-left: 1px solid var(--border); }
+.seg button:hover:not(.active) { background: transparent; color: var(--ink); }
 .seg button.active {
-  background: var(--accent);
-  color: #fff;
+  background: var(--surface);
+  color: var(--ink);
+  border: none;
+  box-shadow: var(--shadow-sm);
 }
 
 .legend {

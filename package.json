@@ -7,6 +7,7 @@
     "bun": ">=1.1.0"
   },
   "scripts": {
+    "dev": "bun server/index.js",
     "start": "bun server/index.js",
     "setup": "bun scripts/fetch-vendor.mjs",
     "icons": "bun scripts/generate-icons.mjs",
