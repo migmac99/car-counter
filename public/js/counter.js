@@ -51,7 +51,7 @@ export class LineCounter {
       if (!state) {
         // Seed on first sight, but only from a settled position outside the band.
         if (Math.abs(dist) > this.hysteresis) {
-          this.#state.set(track.id, { side: Math.sign(dist), pos, lastCross: 0 });
+          this.#state.set(track.id, { side: Math.sign(dist), pos, lastCross: -Infinity });
         }
         continue;
       }

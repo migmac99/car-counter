@@ -10,7 +10,7 @@
     "start": "node server/index.js",
     "setup": "node scripts/fetch-vendor.mjs",
     "icons": "node scripts/generate-icons.mjs",
-    "test": "node --test test/"
+    "test": "node --test 'test/*.test.js'"
   },
   "license": "MIT"
 }
