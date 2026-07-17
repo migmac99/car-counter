@@ -44,10 +44,11 @@ data/             SQLite database — gitignored, created on first run
 ## Scripts
 
 ```sh
+bun i            # workspace install (worker deps) + postinstall fetches ML vendor files
 bun start        # run the server (PORT, HOST, DB_FILE env vars)
 bun run dev      # same with hot reload (bun --hot): edit server files, keep the socket
-bun test         # 43 tests across 5 files, ~45 ms
-bun run setup    # fetch ML vendor files (idempotent; --force to re-fetch)
+bun test         # 58 tests across 7 files, ~100 ms
+bun run setup    # re-fetch ML vendor files (idempotent; --force, --model s)
 bun run icons    # regenerate public/icons/*.png after changing the art
 ```
 

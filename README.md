@@ -50,12 +50,15 @@ crossing events in SQLite and serves aggregated statistics.
 Requires Bun ≥ 1.1 (`curl -fsSL https://bun.sh/install | bash` or `brew install bun`).
 
 ```sh
-bun run setup               # one-time: ML runtimes + models (~45 MB; --model s for YOLOX-s)
-bun install --cwd worker    # one-time: enables server-side counting (needs ffmpeg)
-bun start                   # ONE server: dashboard + storage + counting engine
-bun run dev                 # same, with hot reload for development
-bun test                    # run the unit + integration test suite
+bun i        # installs everything: engine deps + ML runtimes + models (~45 MB)
+bun dev      # ONE server: dashboard + storage + counting engine (hot reload)
+bun start    # same, without hot reload
+bun test     # run the unit + integration test suite
 ```
+
+(`brew install ffmpeg` if you don't have it — it's the camera capture for
+server-side counting. `bun run setup --model s` fetches the most accurate
+YOLOX-s model.) Killing the server stops everything, capture included.
 
 Open <http://localhost:3000>, click **Start server counting**, then
 **Add line** and click two points across the road (you're drawing on the

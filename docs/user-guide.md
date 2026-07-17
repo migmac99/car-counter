@@ -165,8 +165,8 @@ the web UI is just a live window onto it (the video you see is the server's
 own preview). Close every tab, quit the browser, lock the screen: counting
 continues as long as the server runs.
 
-One-time setup: `brew install ffmpeg` and `bun install --cwd worker`; then
-click **Start server counting** in the toolbar. macOS will ask once for
+One-time setup: `brew install ffmpeg` (everything else came with `bun i`);
+then click **Start server counting** in the toolbar. macOS will ask once for
 camera permission — for your **terminal** app this time, since the server
 does the capturing. Enablement persists: the engine auto-starts whenever
 the server starts. Pick the camera index in Settings → Engine camera #
