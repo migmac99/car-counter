@@ -127,6 +127,7 @@ main {
   text-align: center;
   padding: 1rem;
 }
+.video-hint[hidden] { display: none; }
 
 .toolbar {
   display: flex;

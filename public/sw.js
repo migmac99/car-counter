@@ -1,7 +1,9 @@
-/* Service worker: precache the app shell, runtime-cache the ML vendor files,
-   and keep /api traffic network-first so stats stay fresh but survive offline. */
+/* Service worker strategy:
+   - app shell + /api: network-first, cached fallback → always fresh online,
+     still works offline
+   - /vendor/ (ML runtime + model, ~16 MB): cache-first → downloaded once */
 
-const VERSION = 'car-counter-v1';
+const VERSION = 'car-counter-v2';
 const SHELL_CACHE = `${VERSION}-shell`;
 const RUNTIME_CACHE = `${VERSION}-runtime`;
 
@@ -50,43 +52,45 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET' || url.origin !== location.origin) return;
 
-  // Stats/config reads: network-first with cache fallback so the dashboard
-  // still renders (with last-known data) when the server is unreachable.
-  if (url.pathname.startsWith('/api/')) {
+  // Vendored ML runtime + model: effectively immutable, cache-first.
+  if (url.pathname.startsWith('/vendor/')) {
     event.respondWith(
-      fetch(event.request)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(RUNTIME_CACHE).then((cache) => cache.put(event.request, copy));
-          return res;
-        })
-        .catch(async () => {
-          const cached = await caches.match(event.request);
-          return (
-            cached ??
-            new Response(JSON.stringify({ error: 'offline' }), {
-              status: 503,
-              headers: { 'Content-Type': 'application/json' },
-            })
-          );
-        })
+      caches.match(event.request).then(
+        (cached) =>
+          cached ??
+          fetch(event.request).then((res) => {
+            if (res.ok) {
+              const copy = res.clone();
+              caches.open(RUNTIME_CACHE).then((cache) => cache.put(event.request, copy));
+            }
+            return res;
+          })
+      )
     );
     return;
   }
 
-  // Static assets (shell + vendored model): cache-first, fill the runtime
-  // cache on first fetch so the multi-MB model downloads only once.
+  // Everything else (app shell and /api reads): network-first so updates and
+  // fresh stats always win online; fall back to cache when offline.
   event.respondWith(
-    caches.match(event.request).then(
-      (cached) =>
-        cached ??
-        fetch(event.request).then((res) => {
-          if (res.ok) {
-            const copy = res.clone();
-            caches.open(RUNTIME_CACHE).then((cache) => cache.put(event.request, copy));
-          }
-          return res;
-        })
-    )
+    fetch(event.request)
+      .then((res) => {
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(RUNTIME_CACHE).then((cache) => cache.put(event.request, copy));
+        }
+        return res;
+      })
+      .catch(async () => {
+        const cached = await caches.match(event.request);
+        if (cached) return cached;
+        if (url.pathname.startsWith('/api/')) {
+          return new Response(JSON.stringify({ error: 'offline' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return Response.error();
+      })
   );
 });
