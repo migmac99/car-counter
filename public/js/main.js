@@ -1,4 +1,4 @@
-import { listCameras, openCamera, openFile, stopSource } from './camera.js';
+import { listCameras, openCamera, openFile, stopSource, cameraSettings } from './camera.js';
 import { Detector, VEHICLE_CLASSES } from './detector.js';
 import { Tracker } from './tracker.js';
 import { LineCounter } from './counter.js';
@@ -22,6 +22,7 @@ const $ = (id) => document.getElementById(id);
 
 const refs = {
   status: $('status'),
+  perf: $('perf'),
   video: $('video'),
   videoWrap: $('video-wrap'),
   videoStage: $('video-stage'),
@@ -317,22 +318,35 @@ function viewRect() {
 
 let cropCanvas = null;
 
-/** The frame source for the detector: full video at 1×, the visible crop when zoomed. */
+// The detector's network resizes its input to 300×300 internally, so feeding
+// frames larger than ~640px only costs GPU upload time without adding
+// accuracy. Down-scaling 1080p to 640×360 cuts per-frame texture upload ~9×.
+const DETECT_MAX_SIDE = 640;
+
+/**
+ * The frame source for the detector: the visible crop (what you see is what
+ * the model sees), down-scaled to the detection budget. Returns the mapping
+ * back to full-frame pixels: bboxFull = {x,y} + bboxDetected × invScale.
+ */
 function detectionSource() {
   const { z, cx, cy } = state.view;
-  if (z <= 1) return { source: refs.video, offsetX: 0, offsetY: 0 };
   const { w, h } = videoSize();
-  const cw = Math.round(w / z);
-  const ch = Math.round(h / z);
-  const x = Math.round(Math.min(w - cw, Math.max(0, cx * w - cw / 2)));
-  const y = Math.round(Math.min(h - ch, Math.max(0, cy * h - ch / 2)));
+  const zoomed = z > 1;
+  const cw = zoomed ? Math.round(w / z) : w;
+  const ch = zoomed ? Math.round(h / z) : h;
+  const x = zoomed ? Math.round(Math.min(w - cw, Math.max(0, cx * w - cw / 2))) : 0;
+  const y = zoomed ? Math.round(Math.min(h - ch, Math.max(0, cy * h - ch / 2))) : 0;
+  const scale = Math.min(1, DETECT_MAX_SIDE / Math.max(cw, ch));
+  if (!zoomed && scale === 1) return { source: refs.video, x: 0, y: 0, invScale: 1 };
+  const dw = Math.max(1, Math.round(cw * scale));
+  const dh = Math.max(1, Math.round(ch * scale));
   cropCanvas ??= document.createElement('canvas');
-  if (cropCanvas.width !== cw || cropCanvas.height !== ch) {
-    cropCanvas.width = cw;
-    cropCanvas.height = ch;
+  if (cropCanvas.width !== dw || cropCanvas.height !== dh) {
+    cropCanvas.width = dw;
+    cropCanvas.height = dh;
   }
-  cropCanvas.getContext('2d').drawImage(refs.video, x, y, cw, ch, 0, 0, cw, ch);
-  return { source: cropCanvas, offsetX: x, offsetY: y };
+  cropCanvas.getContext('2d').drawImage(refs.video, x, y, cw, ch, 0, 0, dw, dh);
+  return { source: cropCanvas, x, y, invScale: cw / dw };
 }
 
 // --- shape editing ---
@@ -443,21 +457,32 @@ function finishAutoRoad(moves) {
 // --- detection loop ---
 let detecting = false;
 
+// Rolling performance counters, reported in the header perf chip.
+const perf = { detMs: 0, detCount: 0, camFrames: 0, windowStart: performance.now() };
+
 async function step(now) {
   if (!state.running || refs.video.readyState < 2 || !detector.ready || detecting) return;
   detecting = true;
   try {
-    const { source, offsetX, offsetY } = detectionSource();
-    const detected = await detector.detect(source, {
+    const src = detectionSource();
+    const t0 = performance.now();
+    const detected = await detector.detect(src.source, {
       minScore: state.minScore,
       classes: state.classes,
     });
     if (!detected) return;
+    perf.detMs = perf.detMs * 0.9 + (performance.now() - t0) * 0.1;
+    perf.detCount += 1;
     const detections =
-      offsetX || offsetY
+      src.invScale !== 1 || src.x || src.y
         ? detected.map((d) => ({
             ...d,
-            bbox: [d.bbox[0] + offsetX, d.bbox[1] + offsetY, d.bbox[2], d.bbox[3]],
+            bbox: [
+              src.x + d.bbox[0] * src.invScale,
+              src.y + d.bbox[1] * src.invScale,
+              d.bbox[2] * src.invScale,
+              d.bbox[3] * src.invScale,
+            ],
           }))
         : detected;
     const zonePolys = state.zones
@@ -498,9 +523,51 @@ async function step(now) {
   }
 }
 
+// Pace detection to actual video frames when the browser supports it — no
+// wasted inference on duplicate frames, and camera fps becomes measurable.
+const HAS_RVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+let rvfcToken = 0;
+
+function startDetectionLoop() {
+  if (!HAS_RVFC) return; // rAF fallback in frame()
+  const token = ++rvfcToken;
+  const onFrame = () => {
+    if (token !== rvfcToken) return;
+    perf.camFrames += 1;
+    step(Date.now());
+    refs.video.requestVideoFrameCallback(onFrame);
+  };
+  refs.video.requestVideoFrameCallback(onFrame);
+}
+
+function updatePerfChip() {
+  const now = performance.now();
+  const seconds = (now - perf.windowStart) / 1000;
+  perf.windowStart = now;
+  if (!state.running || seconds <= 0) {
+    refs.perf.hidden = true;
+    perf.detCount = 0;
+    perf.camFrames = 0;
+    return;
+  }
+  const camFps = HAS_RVFC ? Math.round(perf.camFrames / seconds) : null;
+  const detPerSec = Math.round(perf.detCount / seconds);
+  perf.detCount = 0;
+  perf.camFrames = 0;
+  const cam = cameraSettings(refs.video);
+  const size = cam ? `${cam.width}×${cam.height}` : `${refs.video.videoWidth}×${refs.video.videoHeight}`;
+  const fpsText = camFps != null ? ` @${camFps}` : '';
+  refs.perf.textContent = `${size}${fpsText} · det ${detPerSec}/s · ${Math.max(1, Math.round(perf.detMs))} ms`;
+  refs.perf.hidden = false;
+  // A camera below ~15 fps (long exposure in low light, USB bandwidth) blurs
+  // motion and starves the tracker — flag it.
+  refs.perf.classList.toggle('warn', camFps != null && camFps > 0 && camFps < 15);
+}
+setInterval(updatePerfChip, 2000);
+
 function frame() {
   overlay.resize();
-  step(Date.now());
+  if (!HAS_RVFC) step(Date.now());
   overlay.draw({
     tracks: state.running ? tracker.tracks : [],
     lines: editor.shapes.lines,
@@ -535,6 +602,7 @@ function sourceStarted() {
   refs.stopBtn.disabled = false;
   syncCounters();
   editor.setShapes(shapesToPixels());
+  startDetectionLoop();
   setStatus(state.lines.length ? 'counting' : 'running — add a counting line');
 }
 
@@ -568,6 +636,8 @@ refs.fileInput.addEventListener('change', async () => {
 refs.stopBtn.addEventListener('click', () => {
   state.running = false;
   state.wasRunning = false;
+  rvfcToken += 1; // end the frame-paced detection chain
+  refs.perf.hidden = true;
   persistConfig();
   stopSource(refs.video);
   refs.stopBtn.disabled = true;

@@ -75,7 +75,7 @@ export function createApp({ dbFile = join(ROOT, 'data', 'car-counter.sqlite') } 
 export function startServer({
   port = Number(process.env.PORT ?? 3000),
   hostname = process.env.HOST ?? '0.0.0.0',
-  dbFile,
+  dbFile = process.env.DB_FILE,
 } = {}) {
   const app = createApp(dbFile ? { dbFile } : {});
   const server = Bun.serve({

@@ -13,9 +13,12 @@ export async function openCamera(video, deviceId) {
   const constraints = {
     audio: false,
     video: {
-      // Ask for 1080p so digital zoom still has real pixels to crop into.
+      // 1080p so digital zoom has real pixels; 30 fps so fast traffic gets
+      // enough samples per crossing (cameras may silently deliver less in
+      // low light — the perf chip surfaces what was actually achieved).
       width: { ideal: 1920 },
       height: { ideal: 1080 },
+      frameRate: { ideal: 30 },
       ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'environment' }),
     },
   };
@@ -32,6 +35,14 @@ export async function openFile(video, file) {
   video.src = URL.createObjectURL(file);
   video.loop = true;
   await video.play();
+}
+
+/** Actual settings the camera granted (null for file sources). */
+export function cameraSettings(video) {
+  const track = video.srcObject?.getVideoTracks?.()[0];
+  if (!track) return null;
+  const s = track.getSettings();
+  return { width: s.width, height: s.height, frameRate: s.frameRate };
 }
 
 export function stopSource(video) {

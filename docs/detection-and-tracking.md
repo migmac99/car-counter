@@ -20,6 +20,22 @@ video frame → detect (COCO-SSD) → filter (class, confidence, zone)
 - A `busy` flag skips frames while the previous inference is still running,
   so slow devices degrade to a lower detection rate instead of queueing.
 
+### Real-time performance
+
+- Detection is **paced to camera frames** (`requestVideoFrameCallback`), so
+  every new frame is processed exactly once — no wasted inference on
+  duplicate frames, no missed ones while the loop idles.
+- The detector input is capped at **640 px** on the longer side: the network
+  resizes to 300×300 internally, so anything larger only costs GPU texture
+  upload (1080p → 640×360 cuts upload ~9× with no accuracy change). When
+  zoomed, the visible crop is what gets scaled.
+- Measured on an Apple-silicon laptop (WebGL backend): ~12–23 ms per
+  inference — real-time headroom for 30 fps cameras. The header perf chip
+  shows the live numbers.
+- Cameras are asked for 1080p @ 30 fps; the chip warns below 15 fps, where
+  motion blur (long exposures) starts hurting recall more than any software
+  can recover.
+
 **Known limitation:** COCO-SSD is trained on natural photos and performs
 poorly on **steep top-down/overhead views** — a camera looking straight down
 at a road may detect almost nothing. Mount the camera with a street-level or
@@ -100,7 +116,7 @@ meaningful displacement and gives up after 30 s of quiet road.
 
 | Parameter | Default | Where | Effect of raising |
 |---|---|---|---|
-| Confidence threshold | 0.5 | Settings UI | Fewer false detections, more misses |
+| Confidence threshold | 0.5 (0.15–0.8) | Settings UI | Fewer false detections, more misses |
 | `iouThreshold` | 0.15 | `tracker.js` | Stricter association, more ID switches |
 | `minHits` | 3 | `tracker.js` | Fewer ghost tracks, slower confirmation |
 | `maxAgeMs` | 1500 | `tracker.js` | Survives longer occlusion, risks ID reuse across cars |

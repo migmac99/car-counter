@@ -37,6 +37,15 @@ online, but the PWA then needs connectivity on first use.
 4. Watch the overlay: white boxes are tracked vehicles with IDs, blue trails
    show their paths, and a pulse marks each count.
 
+While a source is running, the header shows a **performance chip**:
+`1920×1080 @30 · det 30/s · 12 ms` — camera resolution @ actual camera fps,
+detections per second, and inference latency. Detection is paced one-to-one
+with camera frames, so `det ≈ fps` means you are processing every frame in
+real time. The chip turns red if the camera delivers under 15 fps (usually
+low light forcing long exposures, or USB bandwidth) — fix lighting or lower
+resolution, because low camera fps also means motion blur the detector
+can't see through.
+
 ### Lanes and auto-detection
 
 - **Add lanes…** asks how many lanes the road has, then lets you draw ONE
@@ -66,8 +75,10 @@ enter the distance in meters and optionally a speed limit:
 Accuracy depends on the declared distance and on the gates being far enough
 apart that timing granularity doesn't matter (aim for ≥ 1.5 s of travel
 between gates; in verification a synthetic 46.8 km/h vehicle measured
-46.1 km/h). Speeds are indicative — this is not a calibrated enforcement
-instrument.
+46.8 km/h). When zoomed, keep both gates **well inside the visible view**
+(≥ ~15 % from its edges) — vehicles entering the view are only partially
+visible, which skews their position and therefore the crossing time.
+Speeds are indicative — this is not a calibrated enforcement instrument.
 
 ### Editing shapes
 
@@ -103,8 +114,10 @@ automatically** on the next visit.
 
 ### Settings
 
-- **Min confidence** (0.3–0.8): raise it if shadows/bushes get counted,
-  lower it if cars are missed. Default 0.5.
+- **Min confidence** (0.15–0.8): raise it if shadows/bushes get counted,
+  lower it if cars are missed. Default 0.5. Distant/blurry cameras often
+  need 0.2–0.3 — pair a low threshold with a detection zone over the road
+  so foliage can't produce false counts.
 - **Vehicle classes**: cars, trucks, buses, motorcycles.
 - **Count**: both directions, forward only, or reverse only — affects the
   displayed totals; both directions are always recorded.

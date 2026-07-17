@@ -41,7 +41,7 @@ data/             SQLite database — gitignored, created on first run
 ## Scripts
 
 ```sh
-bun start        # run the server (PORT, HOST env vars)
+bun start        # run the server (PORT, HOST, DB_FILE env vars)
 bun run dev      # same with hot reload (bun --hot): edit server files, keep the socket
 bun test         # 43 tests across 5 files, ~45 ms
 bun run setup    # fetch ML vendor files (idempotent; --force to re-fetch)
