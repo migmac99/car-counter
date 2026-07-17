@@ -59,7 +59,11 @@ outgrow in-browser inference.
   shows the live numbers.
 - Cameras are asked for 1080p @ 30 fps; the chip warns below 15 fps, where
   motion blur (long exposures) starts hurting recall more than any software
-  can recover.
+  can recover. Note that in the dark, webcams genuinely deliver fewer
+  frames (a C922 drops to ~5-7 fps at night from long exposure) — the
+  engine paces to real frames (`-fps_mode passthrough` for cameras;
+  AVFoundation otherwise pads to a constant rate with duplicates, measured
+  115 fps of identical frames from a 30 fps camera).
 
 **Known limitation:** COCO-SSD is trained on natural photos and performs
 poorly on **steep top-down/overhead views** — a camera looking straight down

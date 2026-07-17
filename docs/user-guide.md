@@ -181,7 +181,13 @@ server's numbers (`… · coreml (server)`). All editing — lines, zones,
 zoom, presets — works exactly the same, applied live to the engine.
 
 Prevent system sleep (`caffeinate -dis`) — sleep still pauses everything,
-and the engine re-acquires the camera automatically on wake.
+and the engine re-acquires the camera automatically on wake. Engine
+problems (camera permission, unplugged device) appear in the status chip
+with remediation hints — a healthy engine shows `counting (server)`.
+
+**Fully offline**: after `bun i` (which vendors every ML runtime and
+model), the system makes zero external network requests — verified by
+auditing a complete browser session. The whole stack runs air-gapped.
 
 `worker/index.js` remains as a standalone CLI for running the capture on a
 **different machine** than the server (`--server http://host:3000`), or for

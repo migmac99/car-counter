@@ -190,7 +190,13 @@ export class CountingEngine {
       [
         '-y', '-loglevel', 'error',
         ...inputArgs,
-        '-vf', filter, '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1',
+        // Cameras only — passthrough: one output frame per REAL camera frame.
+        // Without it, AVFoundation's odd timestamps make ffmpeg duplicate
+        // frames to a constant rate (measured 115 fps from a 30 fps camera),
+        // wasting inference on identical images. File sources keep default
+        // pacing (their timestamps are clean; passthrough halved them).
+        '-vf', filter, ...(src.input ? [] : ['-fps_mode', 'passthrough']),
+        '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1',
         '-vf', previewFilter, '-r', String(PREVIEW_FPS), '-q:v', '5',
         '-update', '1', '-atomic_writing', '1', '-f', 'image2', this.previewPath,
       ],
