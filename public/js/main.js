@@ -324,10 +324,10 @@ function viewRect() {
 
 let cropCanvas = null;
 
-// The detector's network resizes its input to 300×300 internally, so feeding
-// frames larger than ~640px only costs GPU upload time without adding
-// accuracy. Down-scaling 1080p to 640×360 cuts per-frame texture upload ~9×.
-const DETECT_MAX_SIDE = 640;
+// Cap the detection crop at the model's own input size: anything larger only
+// costs upload/resample time, and matching it avoids a second resampling
+// pass (1080p → cap → model input becomes one draw).
+const detectCap = () => detector.inputSize;
 
 /**
  * The frame source for the detector: the visible crop (what you see is what
@@ -342,7 +342,7 @@ function detectionSource() {
   const ch = zoomed ? Math.round(h / z) : h;
   const x = zoomed ? Math.round(Math.min(w - cw, Math.max(0, cx * w - cw / 2))) : 0;
   const y = zoomed ? Math.round(Math.min(h - ch, Math.max(0, cy * h - ch / 2))) : 0;
-  const scale = Math.min(1, DETECT_MAX_SIDE / Math.max(cw, ch));
+  const scale = Math.min(1, detectCap() / Math.max(cw, ch));
   if (!zoomed && scale === 1) return { source: refs.video, x: 0, y: 0, invScale: 1 };
   const dw = Math.max(1, Math.round(cw * scale));
   const dh = Math.max(1, Math.round(ch * scale));
@@ -560,7 +560,8 @@ function updatePerfChip() {
   const cam = cameraSettings(refs.video);
   const size = cam ? `${cam.width}×${cam.height}` : `${refs.video.videoWidth}×${refs.video.videoHeight}`;
   const fpsText = camFps != null ? ` @${camFps}` : '';
-  refs.perf.textContent = `${size}${fpsText} · det ${detPerSec}/s · ${Math.max(1, Math.round(perf.detMs))} ms`;
+  const ep = detector.backendInfo ? ` · ${detector.backendInfo}` : '';
+  refs.perf.textContent = `${size}${fpsText} · det ${detPerSec}/s · ${Math.max(1, Math.round(perf.detMs))} ms${ep}`;
   refs.perf.hidden = false;
   // A camera below ~15 fps (long exposure in low light, USB bandwidth) blurs
   // motion and starves the tracker — flag it.

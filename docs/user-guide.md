@@ -38,8 +38,10 @@ online, but the PWA then needs connectivity on first use.
    show their paths, and a pulse marks each count.
 
 While a source is running, the header shows a **performance chip**:
-`1920×1080 @30 · det 30/s · 12 ms` — camera resolution @ actual camera fps,
-detections per second, and inference latency. Detection is paced one-to-one
+`1920×1080 @30 · det 30/s · 12 ms · webgpu` — camera resolution @ actual
+camera fps, detections per second, inference latency, and which execution
+provider is running (webgpu is the fast path; `wasm×N` is the CPU
+fallback). Detection is paced one-to-one
 with camera frames, so `det ≈ fps` means you are processing every frame in
 real time. The chip turns red if the camera delivers under 15 fps (usually
 low light forcing long exposures, or USB bandwidth) — fix lighting or lower
@@ -175,6 +177,7 @@ HTTP from any device — only the camera needs the secure context.
 | "camera unavailable" | Grant camera permission; make sure the page is on localhost or HTTPS; close other apps using the camera |
 | "model failed to load" | Run `bun run setup` on the server, or check connectivity for the CDN fallback |
 | Nothing gets detected | Check the viewpoint (avoid overhead angles), raise camera resolution, lower Min confidence, make sure vehicles are reasonably large in frame |
+| Only some vehicles counted | Lower Min confidence (distant/blurry cars score low); switch to a stronger model (YOLOX-s); check the perf chip — `det/s` should match camera fps, and `webgpu` beats `wasm` |
 | Cars counted twice | Raise Min confidence; draw the line where traffic doesn't stop on it; the built-in hysteresis+cooldown handles normal jitter |
 | Counts missed | Line too close to the frame edge (tracks need ≥ 3 detections before counting); occlusion in dense traffic; try a cleaner stretch of road |
 | Stats not updating | The event queue uploads every 3 s — check the server is running; offline events appear after reconnect |

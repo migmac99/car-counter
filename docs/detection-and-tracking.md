@@ -30,8 +30,14 @@ AGPL licensing; the events API accepts any external producer if you ever
 outgrow in-browser inference.
 
 - YOLOX pre/post-processing lives in `yolox.js` (letterbox to the input
-  square, BGR CHW floats, stride-grid decode, class-agnostic NMS) and is
-  unit-tested in isolation.
+  square, BGR CHW floats, stride-grid decode) and is unit-tested in
+  isolation. NMS is **two-tier**, tuned for counting: same-class duplicates
+  suppress at IoU 0.5, but different-class boxes only merge above IoU 0.7 —
+  so a car partly hidden behind a truck survives as two vehicles, while one
+  vehicle the model hedges between "car" and "truck" stays a single
+  detection instead of double-counting.
+- The detection crop is capped at the **model's own input size** (416/640),
+  so 1080p → model input is a single resample.
 - Kept classes: `car`, `truck`, `bus`, `motorcycle` (user-filterable).
 - The detector returns **all candidates down to score 0.1** — the
   confidence slider decides what counts as a firm detection, while weaker

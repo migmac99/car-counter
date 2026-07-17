@@ -46,14 +46,33 @@ test('decode ignores non-vehicle classes and weak scores', () => {
   assert.equal(none.length, 0);
 });
 
-test('nms suppresses overlapping boxes, keeps the strongest', () => {
+test('nms suppresses same-class duplicates, keeps the strongest', () => {
   const dets = [
     { bbox: [0, 0, 100, 100], score: 0.9, classId: 2 },
-    { bbox: [5, 5, 100, 100], score: 0.8, classId: 2 }, // heavy overlap
+    { bbox: [5, 5, 100, 100], score: 0.8, classId: 2 }, // heavy overlap, same class
     { bbox: [300, 300, 80, 80], score: 0.7, classId: 7 }, // far away
   ];
   const kept = nms(dets, 0.45);
   assert.equal(kept.length, 2);
   assert.equal(kept[0].score, 0.9);
   assert.equal(kept[1].score, 0.7);
+});
+
+test('nms keeps moderately overlapping vehicles of different classes (car behind truck)', () => {
+  const dets = [
+    { bbox: [0, 0, 100, 100], score: 0.9, classId: 7 }, // truck
+    { bbox: [40, 20, 90, 90], score: 0.6, classId: 2 }, // car partly behind it, IoU ~0.36
+  ];
+  const kept = nms(dets);
+  assert.equal(kept.length, 2, 'different real objects both survive');
+});
+
+test('nms merges near-identical boxes with different class labels (one hedged vehicle)', () => {
+  const dets = [
+    { bbox: [0, 0, 100, 100], score: 0.9, classId: 2 }, // "car"
+    { bbox: [3, 2, 98, 99], score: 0.7, classId: 7 }, // same object called "truck", IoU ~0.9
+  ];
+  const kept = nms(dets);
+  assert.equal(kept.length, 1, 'one physical vehicle, one detection');
+  assert.equal(kept[0].classId, 2, 'strongest label wins');
 });

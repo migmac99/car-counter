@@ -60,6 +60,9 @@ export async function availableModels() {
 }
 
 class CocoSsdBackend {
+  inputSize = 640; // its own graph resizes to 300²; 640 keeps resampling cheap
+  ep = 'tfjs-webgl';
+
   async init(onStatus) {
     onStatus('loading TF.js runtime…');
     await injectScript('/vendor/tf.min.js').catch(() => injectScript(CDN_TF, true));
@@ -89,21 +92,37 @@ class YoloxBackend {
   constructor(variant) {
     this.variant = YOLOX_VARIANTS[variant];
     this.name = variant;
+    this.inputSize = this.variant.size;
   }
 
   async init(onStatus) {
     onStatus('loading ONNX runtime…');
     if (!globalThis.ort) await injectScript('/vendor/ort/ort.min.js');
     ort.env.wasm.wasmPaths = '/vendor/ort/';
+    // Threads need cross-origin isolation (the server sends COOP/COEP).
+    const threads = crossOriginIsolated ? Math.min(8, navigator.hardwareConcurrency || 4) : 1;
+    ort.env.wasm.numThreads = threads;
     const { size, file } = this.variant;
     onStatus(`loading ${this.name} model…`);
-    // WebGPU when the browser has it; WASM (SIMD, threaded when cross-origin
-    // isolated) otherwise.
-    const providers = 'gpu' in navigator ? ['webgpu', 'wasm'] : ['wasm'];
-    this.session = await ort.InferenceSession.create(`/vendor/models/${file}`, {
-      executionProviders: providers,
-      graphOptimizationLevel: 'all',
-    });
+    const create = (providers) =>
+      ort.InferenceSession.create(`/vendor/models/${file}`, {
+        executionProviders: providers,
+        graphOptimizationLevel: 'all',
+      });
+    // Try WebGPU explicitly so we KNOW which provider is running — a silent
+    // fallback hides an order-of-magnitude performance difference.
+    if ('gpu' in navigator) {
+      try {
+        this.session = await create(['webgpu']);
+        this.ep = 'webgpu';
+      } catch {
+        this.session = null;
+      }
+    }
+    if (!this.session) {
+      this.session = await create(['wasm']);
+      this.ep = `wasm×${threads}${crossOriginIsolated ? '' : ' (restart server for threads)'}`;
+    }
     this.inputName = this.session.inputNames[0];
     this.outputName = this.session.outputNames[0];
     this.grids = buildGrids(size);
@@ -153,6 +172,16 @@ export class Detector {
 
   get ready() {
     return this.#backend !== null;
+  }
+
+  /** The model's native input square — the ideal detection-crop budget. */
+  get inputSize() {
+    return this.#backend?.inputSize ?? 640;
+  }
+
+  /** Which execution provider is actually running (for the perf chip). */
+  get backendInfo() {
+    return this.#backend?.ep ?? '';
   }
 
   /**

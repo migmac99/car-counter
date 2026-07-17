@@ -64,14 +64,26 @@ export function decode(data, grids, minScore) {
   return out;
 }
 
-/** Class-agnostic non-maximum suppression on [{bbox, score}]. */
-export function nms(dets, iouThreshold = 0.45) {
+/**
+ * Two-tier non-maximum suppression on [{bbox, classId, score}], tuned for
+ * vehicle counting:
+ *
+ *  - same class: suppress above `iouThreshold` (0.5) — ordinary duplicate
+ *    removal, permissive because side-view traffic genuinely overlaps;
+ *  - different classes: suppress only above `crossClassThreshold` (0.7) —
+ *    near-identical boxes with different labels are one physical vehicle
+ *    the model hedged between car/truck, and counting both would double-
+ *    count it; moderate cross-class overlap (a car partly behind a truck)
+ *    stays two objects.
+ */
+export function nms(dets, iouThreshold = 0.5, crossClassThreshold = 0.7) {
   const sorted = [...dets].sort((a, b) => b.score - a.score);
   const kept = [];
   for (const d of sorted) {
     let suppressed = false;
     for (const k of kept) {
-      if (iou(d.bbox, k.bbox) > iouThreshold) {
+      const overlap = iou(d.bbox, k.bbox);
+      if (overlap > (k.classId === d.classId ? iouThreshold : crossClassThreshold)) {
         suppressed = true;
         break;
       }
