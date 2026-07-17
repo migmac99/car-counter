@@ -3,22 +3,33 @@ import { Store } from './db.js';
 import { routes, ApiError } from './api.js';
 import { makeStaticHandler } from './static.js';
 
-// The counting engine is optional: it needs ffmpeg plus the worker's
-// onnxruntime-node dependency (bun install --cwd worker). Without them the
-// server still runs fully — the browser does the counting instead.
-let engineModule = null;
-let engineUnavailableReason = null;
-try {
-  engineModule = await import('../worker/engine.js');
-  engineUnavailableReason = engineModule.checkRequirements();
-  if (engineUnavailableReason) engineModule = null;
-} catch {
-  engineUnavailableReason =
-    "engine dependencies not installed — run: bun install --cwd worker (and ensure ffmpeg is installed)";
-}
+import { EngineProxy } from './engine-proxy.js';
 
 const ROOT = resolve(import.meta.dir, '..');
 const MAX_BODY_BYTES = 512 * 1024;
+
+// The counting engine is optional: it needs ffmpeg plus the worker's
+// onnxruntime-node dependency (installed by `bun i`). Without them the
+// server still runs fully — the browser does the counting instead. The
+// heavy runtime loads only inside the engine's worker thread; here we just
+// check availability.
+let devicesModule = null;
+let engineSupported = false;
+let engineUnavailableReason = null;
+try {
+  devicesModule = await import('../worker/devices.js');
+  engineUnavailableReason = devicesModule.checkRequirements();
+  if (!engineUnavailableReason) {
+    try {
+      Bun.resolveSync('onnxruntime-node', join(ROOT, 'worker'));
+      engineSupported = true;
+    } catch {
+      engineUnavailableReason = 'engine dependencies not installed — run: bun i';
+    }
+  }
+} catch (err) {
+  engineUnavailableReason = `engine unavailable: ${err.message}`;
+}
 
 // The app runs detection locally and only talks to its own origin, plus the
 // CDN/model hosts used as fallback when vendored assets are absent.
@@ -45,12 +56,7 @@ const SECURITY_HEADERS = {
 export function createApp({ dbFile = join(ROOT, 'data', 'car-counter.sqlite') } = {}) {
   const store = new Store(dbFile);
   const serveStatic = makeStaticHandler(join(ROOT, 'public'));
-  const engine = engineModule
-    ? new engineModule.CountingEngine({
-        getConfig: () => store.getConfig('app') ?? {},
-        postEvents: (events) => store.insertEvents(events),
-      })
-    : null;
+  const engine = engineSupported ? new EngineProxy(store) : null;
 
   async function handle(req, url) {
     if (!url.pathname.startsWith('/api/')) {
@@ -81,7 +87,7 @@ export function createApp({ dbFile = join(ROOT, 'data', 'car-counter.sqlite') } 
         rawBody,
         engine,
         engineUnavailableReason,
-        listDevices: engineModule?.listDevices,
+        listDevices: devicesModule?.listDevices,
       });
       if (result instanceof Response) return result;
       return Response.json(result);
@@ -123,7 +129,7 @@ if (import.meta.main) {
   // Under `bun --hot` this module re-evaluates on every save; Bun.serve reuses
   // the listening socket and swaps the fetch handler in place. Close the
   // previous run's DB connection and register signal handlers only once.
-  await globalThis.__carCounter?.engine?.stop();
+  await globalThis.__carCounter?.engine?.dispose();
   globalThis.__carCounter?.store.close();
   globalThis.__carCounter = startServer();
   const { server, store, engine } = globalThis.__carCounter;
@@ -146,7 +152,7 @@ if (import.meta.main) {
     globalThis.__carCounterSignals = true;
     for (const signal of ['SIGINT', 'SIGTERM']) {
       process.on(signal, async () => {
-        await globalThis.__carCounter.engine?.stop();
+        await globalThis.__carCounter.engine?.dispose();
         globalThis.__carCounter.server.stop();
         globalThis.__carCounter.store.close();
         process.exit(0);

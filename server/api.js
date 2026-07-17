@@ -114,6 +114,55 @@ export const routes = {
     });
   },
 
+  // Push stream of preview frames (multipart MJPEG): lower latency and far
+  // less HTTP churn than polling /api/preview.
+  'GET /api/preview.mjpeg': (store, { engine }) => {
+    if (!engine) throw new ApiError(503, 'engine unavailable');
+    const BOUNDARY = 'carcounterframe';
+    let timer = null;
+    const stream = new ReadableStream({
+      start(controller) {
+        let lastSeq = -1;
+        let sending = false;
+        timer = setInterval(async () => {
+          if (sending) return;
+          sending = true;
+          try {
+            const frame = await engine.previewFrame(lastSeq);
+            if (frame) {
+              lastSeq = frame.seq;
+              controller.enqueue(
+                Buffer.concat([
+                  Buffer.from(
+                    `--${BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.jpeg.length}\r\n\r\n`
+                  ),
+                  frame.jpeg,
+                  Buffer.from('\r\n'),
+                ])
+              );
+            }
+          } catch {
+            clearInterval(timer);
+            try {
+              controller.close();
+            } catch {}
+          } finally {
+            sending = false;
+          }
+        }, 70);
+      },
+      cancel() {
+        clearInterval(timer);
+      },
+    });
+    return new Response(stream, {
+      headers: {
+        'Content-Type': `multipart/x-mixed-replace; boundary=${BOUNDARY}`,
+        'Cache-Control': 'no-store',
+      },
+    });
+  },
+
   'DELETE /api/events': (store, { query }) => {
     if (query.get('confirm') !== 'yes')
       throw new ApiError(400, "pass ?confirm=yes to delete all recorded events");

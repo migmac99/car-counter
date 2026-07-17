@@ -13,7 +13,7 @@
  * directly; the standalone CLI wires them to HTTP.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,31 +28,7 @@ import { nightFromLuma, effectiveNight, trackingTuning, meanLuma } from '../publ
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PREVIEW_FPS = 8;
 
-/** Null when the engine can run here, else a human-readable reason. */
-export function checkRequirements() {
-  const ff = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' });
-  if (ff.error) return 'ffmpeg not found — install it (macOS: brew install ffmpeg)';
-  return null;
-}
-
-/** Video capture devices as the server sees them: [{index, name}]. */
-export function listDevices() {
-  const res = spawnSync('ffmpeg', ['-f', 'avfoundation', '-list_devices', 'true', '-i', ''], {
-    encoding: 'utf8',
-  });
-  const devices = [];
-  let inVideo = false;
-  for (const line of (res.stderr ?? '').split('\n')) {
-    if (line.includes('AVFoundation video devices')) {
-      inVideo = true;
-      continue;
-    }
-    if (line.includes('AVFoundation audio devices')) break;
-    const m = inVideo ? line.match(/\[(\d+)\]\s+(.+)$/) : null;
-    if (m) devices.push({ index: Number(m[1]), name: m[2].trim() });
-  }
-  return devices;
-}
+export { checkRequirements, listDevices } from './devices.js';
 
 export class CountingEngine {
   #getConfig;
@@ -60,7 +36,6 @@ export class CountingEngine {
   #ffmpeg = null;
   #session = null;
   #busy = false;
-  #latest = null;
   #queue = [];
   #flushTimer = null;
   #retryTimer = null;
@@ -99,6 +74,17 @@ export class CountingEngine {
   async preview() {
     try {
       return await readFile(this.previewPath);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Latest preview frame if newer than `afterSeq`: {jpeg, seq} | null. */
+  async previewFrame(afterSeq = -1) {
+    try {
+      const info = await stat(this.previewPath);
+      if (info.mtimeMs <= afterSeq) return null;
+      return { jpeg: await readFile(this.previewPath), seq: info.mtimeMs };
     } catch {
       return null;
     }
@@ -213,24 +199,44 @@ export class CountingEngine {
     let stderrTail = '';
     this.#ffmpeg.stderr.on('data', (d) => (stderrTail = (stderrTail + d).slice(-400)));
 
+    // Zero-churn frame assembly: chunks copy into a fixed accumulator (no
+    // Buffer.concat — at 1080p that was hundreds of multi-MB copies per
+    // second on the server's event loop). Completed frames swap into a
+    // second fixed buffer; if inference is busy, newer frames overwrite it
+    // (drop-oldest). Inference chains directly to the next pending frame
+    // instead of waiting for another pipe chunk.
     const frameBytes = variant.size * variant.size * 3;
     this.chw = new Float32Array(3 * variant.size * variant.size);
-    let buffer = Buffer.alloc(0);
+    const assembling = Buffer.alloc(frameBytes);
+    const latest = Buffer.alloc(frameBytes);
+    let filled = 0;
+    let pending = false;
+    const maybeProcess = () => {
+      if (this.#busy || !pending || gen !== this.#generation) return;
+      pending = false;
+      this.#busy = true;
+      this.#processFrame(latest)
+        .catch((err) => (this.state.error = err.message))
+        .finally(() => {
+          this.#busy = false;
+          maybeProcess();
+        });
+    };
     this.#ffmpeg.stdout.on('data', (chunk) => {
       if (gen !== this.#generation) return;
-      buffer = Buffer.concat([buffer, chunk]);
-      while (buffer.length >= frameBytes) {
-        this.#latest = buffer.subarray(0, frameBytes);
-        buffer = buffer.subarray(frameBytes);
+      let offset = 0;
+      while (offset < chunk.length) {
+        const n = Math.min(frameBytes - filled, chunk.length - offset);
+        chunk.copy(assembling, filled, offset, offset + n);
+        filled += n;
+        offset += n;
+        if (filled === frameBytes) {
+          filled = 0;
+          assembling.copy(latest); // one bounded memcpy per frame
+          pending = true;
+        }
       }
-      if (this.#latest && !this.#busy) {
-        const f = this.#latest;
-        this.#latest = null;
-        this.#busy = true;
-        this.#processFrame(f)
-          .catch((err) => (this.state.error = err.message))
-          .finally(() => (this.#busy = false));
-      }
+      maybeProcess();
     });
 
     this.#ffmpeg.on('close', (code) => {

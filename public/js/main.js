@@ -798,16 +798,27 @@ function applyEngineUi() {
     }
     refs.videoHint.hidden = true;
     setStatus(state.lines.length ? 'counting (server)' : 'server engine on — add a counting line', true);
-    previewTimer = setInterval(() => {
-      refs.preview.src = `/api/preview?t=${Date.now()}`;
-    }, 150);
+    // Push stream (MJPEG) — much lower latency than polling. If the stream
+    // errors (proxy stripping it, etc.), fall back to polling snapshots.
+    refs.preview.onerror = () => {
+      refs.preview.onerror = null;
+      clearInterval(previewTimer);
+      previewTimer = setInterval(() => {
+        refs.preview.src = `/api/preview?t=${Date.now()}`;
+      }, 250);
+    };
+    refs.preview.src = '/api/preview.mjpeg';
     editor.setShapes(shapesToPixels());
     applyView(); // preview arrives pre-zoomed; drop the CSS transform
-  } else if (!state.running) {
-    refs.videoHint.hidden = false;
-    setStatus('ready — start a camera', false);
-    // The browser becomes the fallback counter; load its model if needed.
-    if (!detector.ready) loadModel(state.model).catch(() => {});
+  } else {
+    refs.preview.onerror = null;
+    refs.preview.removeAttribute('src'); // close the MJPEG stream
+    if (!state.running) {
+      refs.videoHint.hidden = false;
+      setStatus('ready — start a camera', false);
+      // The browser becomes the fallback counter; load its model if needed.
+      if (!detector.ready) loadModel(state.model).catch(() => {});
+    }
   }
 }
 

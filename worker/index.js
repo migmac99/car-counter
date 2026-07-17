@@ -12,7 +12,8 @@
  *   bun worker/index.js --list-devices
  * Options: --server URL  --size WxH  --fps N  --loop  --exit-on-end
  */
-import { CountingEngine, checkRequirements, listDevices } from './engine.js';
+import { CountingEngine } from './engine.js';
+import { checkRequirements, listDevices } from './devices.js';
 
 const args = process.argv.slice(2);
 const opt = (name, fallback) => {

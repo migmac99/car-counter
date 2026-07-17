@@ -19,9 +19,11 @@ scripts/
   fetch-vendor.mjs    Downloads TF.js + COCO-SSD model into public/vendor/
   generate-icons.mjs  Renders the icon set with a hand-rolled PNG encoder
 test/             bun:test suites (unit + full-server integration)
-worker/           Optional headless counting worker (own package.json:
-                  onnxruntime-node; ffmpeg required) — reuses public/js
-                  pipeline modules verbatim
+worker/           The counting engine (own package.json: onnxruntime-node;
+                  ffmpeg required) — reuses public/js pipeline modules
+                  verbatim. engine.js = pipeline; engine-worker.js = worker
+                  -thread host; devices.js = ffmpeg checks (main-safe);
+                  index.js = standalone CLI
 docs/             You are here
 data/             SQLite database — gitignored, created on first run
 ```
