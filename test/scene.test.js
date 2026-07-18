@@ -5,9 +5,10 @@ import { zoneMaxDims, plausibleVehicle } from '../public/js/geometry.js';
 
 test('night detection has hysteresis (no dusk flapping)', () => {
   assert.equal(nightFromLuma(40, false), true, 'dark enters night');
-  assert.equal(nightFromLuma(75, true), true, 'dusk stays night');
-  assert.equal(nightFromLuma(75, false), false, 'dusk stays day');
+  assert.equal(nightFromLuma(60, true), true, 'dusk stays night');
+  assert.equal(nightFromLuma(60, false), false, 'dusk stays day');
   assert.equal(nightFromLuma(120, true), false, 'bright exits night');
+  assert.equal(nightFromLuma(68, false), false, 'shadowed daylight road is day');
 });
 
 test('scene setting overrides measurement', () => {

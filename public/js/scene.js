@@ -8,8 +8,12 @@
  */
 
 // Mean luma (0-255) with hysteresis so dusk doesn't flap the mode.
-export const NIGHT_ENTER_LUMA = 65;
-export const NIGHT_EXIT_LUMA = 90;
+// Calibrated against a real road band: overcast daylight with heavy bridge
+// shadow measures ~68-76, real night far below 40. The old 65/90 band put
+// daylight scenes INSIDE the hysteresis dead zone — one cloudy dip latched
+// night mode until sunset.
+export const NIGHT_ENTER_LUMA = 45;
+export const NIGHT_EXIT_LUMA = 70;
 
 /** Fold a new luma sample into a night/day decision with hysteresis. */
 export function nightFromLuma(meanLuma, wasNight) {
