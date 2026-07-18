@@ -92,12 +92,28 @@ output.alwaysDiscardsLateVideoFrames = true
 
 final class Writer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
   var packed = Data()
+  let expectedW: Int
+  let expectedH: Int
+  init(width: Int32, height: Int32) {
+    expectedW = Int(width)
+    expectedH = Int(height)
+  }
+  let started = Date()
   func captureOutput(
     _ output: AVCaptureOutput,
     didOutput sampleBuffer: CMSampleBuffer,
     from connection: AVCaptureConnection
   ) {
     guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+    // The consumer parses a fixed frame size; delivering anything else
+    // garbles every frame downstream. Preset-sized frames are normal for a
+    // moment while activeFormat takes over — drop those; fail loud if the
+    // wrong size persists.
+    if CVPixelBufferGetWidth(pb) != expectedW || CVPixelBufferGetHeight(pb) != expectedH {
+      if Date().timeIntervalSince(started) < 3 { return }
+      warn("camera delivered \(CVPixelBufferGetWidth(pb))x\(CVPixelBufferGetHeight(pb)), expected \(expectedW)x\(expectedH) — aborting")
+      exit(3)
+    }
     CVPixelBufferLockBaseAddress(pb, .readOnly)
     defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
     let w = CVPixelBufferGetWidthOfPlane(pb, 0)
@@ -132,7 +148,7 @@ final class Writer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
 }
 
 signal(SIGPIPE, SIG_IGN) // surface EPIPE as a write() error, not a kill
-let writer = Writer()
+let writer = Writer(width: width, height: height)
 output.setSampleBufferDelegate(writer, queue: DispatchQueue(label: "cc-capture"))
 guard session.canAddOutput(output) else {
   warn("cannot add video output")
@@ -141,6 +157,13 @@ guard session.canAddOutput(output) else {
 session.addOutput(output)
 session.commitConfiguration()
 
+// macOS quirk (has no .inputPriority preset): the session applies its
+// preset's format when it STARTS, clobbering any activeFormat set before —
+// at 1080p the default preset coincidentally matched, at 720p60 the camera
+// kept sending 1080p and garbled the downstream pipeline. Setting
+// activeFormat after startRunning sticks; the Writer's dimension guard
+// turns any regression into a loud exit instead of striped garbage.
+session.startRunning()
 do {
   try device.lockForConfiguration()
   device.activeFormat = format!
@@ -160,7 +183,6 @@ do {
 let d = CMVideoFormatDescriptionGetDimensions(format!.formatDescription)
 warn("capturing \(device.localizedName) \(d.width)x\(d.height)@\(Int(fps.rounded())) (\(FourCharCode(CMFormatDescriptionGetMediaSubType(format!.formatDescription)).fourCC))")
 
-session.startRunning()
 RunLoop.main.run()
 
 extension FourCharCode {

@@ -162,6 +162,7 @@ export class StatsUi {
     } catch {}
     refs.tileP85Wrap.hidden = !speedActive;
     refs.tileMaxWrap.hidden = !speedActive;
+    refs.speedHint.hidden = speedActive;
     if (!speedActive) return;
     try {
       const sp = await fetchSpeeds();

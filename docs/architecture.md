@@ -156,8 +156,23 @@ getUserMedia, and why the same camera "worked at 30" in the browser.
 `worker/capture.swift` (compiled to `worker/.bin/cc-capture` by `bun i`;
 ~100 lines) opens the camera through AVCaptureSession, which picks those
 MJPEG modes, and streams decoded NV12 frames into ffmpeg's stdin — same
-filter chain from there on. Measured: 5.5 fps → **24-30 fps** at 1080p.
-Without swiftc the engine falls back to the plain ffmpeg path.
+filter chain from there on. Measured: 5.5 fps → **24-30 fps** at 1080p and
+**59 fps** at 720p. Without swiftc the engine falls back to the plain
+ffmpeg path.
+
+Two macOS traps live in that helper, both learned the hard way: session
+presets silently override `activeFormat` unless the format is set *after*
+`startRunning()` (at 1080p the default preset coincidentally matched; at
+720p60 the camera kept sending 1080p and every downstream frame parsed as
+striped garbage), and the delivered-buffer dimensions are therefore
+verified per frame — a mismatch aborts loudly instead of garbling.
+
+**Resolution vs frame rate:** 60 fps requires 720p on the C922, which
+halves the pixels on the road band. On a distant, zoomed view that
+collapses detection recall (tested live: five visible cars, zero
+detections) — capture quality was fine, the cars were simply too small.
+Prefer 1080p30 for far side-views; 720p60 suits closer, wider scenes.
+Both are two clicks in Settings → engine capture/fps.
 
 **Realtime channel.** `GET /api/ws` upgrades to a WebSocket on which the
 server pushes a track snapshot **per processed frame** (~24-30/s) plus

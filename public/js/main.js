@@ -85,6 +85,7 @@ const refs = {
   tileMaxWrap: $('tile-max-wrap'),
   classMix: $('class-mix'),
   speedHistogram: $('speed-histogram'),
+  speedHint: $('speed-hint'),
   speedHistory: $('speed-history'),
   speedChart: $('speed-chart'),
   dirFwd: $('dir-fwd'),
@@ -680,9 +681,17 @@ setInterval(updatePerfChip, 2000);
 // glued to the cars at full display frame rate. The render-time offset
 // adapts to the camera's real frame interval — at a night-time 5 fps the
 // preview lags far more than at 30 fps.
-// ffmpeg's capture→JPEG-write latency (encode plus the preview-rate frame
-// bucketing). The only remaining estimate — everything else is measured.
-const PREVIEW_CAPTURE_LAG_MS = 70;
+// How much older the preview frame's CONTENT is than its file write-time:
+// ffmpeg's fps filter buffers ~2 preview intervals (camera-independent,
+// ~130 ms at 15 fps) and the rawvideo pipe's backpressure queues ~2.5
+// camera frames in the shared decode graph. Calibrated visually against
+// live traffic at 24 fps (measured optimum ≈ 200-250 ms; the model gives
+// 237). Override from the console via window.__previewLagMs if needed.
+const previewLagMs = () => {
+  if (window.__previewLagMs != null) return window.__previewLagMs;
+  const frameInterval = engineStatus?.camFps > 0 ? 1000 / engineStatus.camFps : 42;
+  return 130 + 2.5 * frameInterval;
+};
 
 function engineTracksNow() {
   const tracks = engineStatus.tracks ?? [];
@@ -692,7 +701,7 @@ function engineTracksNow() {
   if (previewWsAt && Date.now() - previewWsAt < 1500) {
     // Timestamped preview: render tracks at the server-clock moment of the
     // frame on screen. No client clock, no latency guessing.
-    dt = previewWsTs - PREVIEW_CAPTURE_LAG_MS - ts;
+    dt = previewWsTs - previewLagMs() - ts;
   } else {
     // MJPEG fallback: estimate how far the shown frame trails live.
     const frameInterval = engineStatus.camFps > 0 ? 1000 / engineStatus.camFps : 33;
