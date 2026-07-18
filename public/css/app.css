@@ -281,8 +281,8 @@ input[type='checkbox'] { accent-color: var(--accent); }
 /* Vehicle-class mix: one labeled proportion bar per class */
 .class-mix { display: grid; gap: 0.35rem; margin-top: 0.75rem; }
 .class-row { display: grid; grid-template-columns: 6.5rem 1fr 3.5rem; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
-.class-row .bar-track { height: 10px; border-radius: 5px; background: var(--muted-bg); overflow: hidden; }
-.class-row .bar-fill { height: 100%; border-radius: 5px; }
+.class-row .bar-track { display: block; height: 10px; border-radius: 5px; background: var(--muted-bg); overflow: hidden; }
+.class-row .bar-fill { display: block; height: 100%; border-radius: 5px; }
 .class-row .class-n { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
 .class-row .class-name { display: flex; align-items: center; gap: 0.4rem; }
 

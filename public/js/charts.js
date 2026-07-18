@@ -410,16 +410,21 @@ export function renderClassMix(container, classes) {
     return;
   }
   container.hidden = false;
-  container.innerHTML = classes
-    .filter((c) => c.total > 0)
-    .map((c) => {
-      const slot = CLASS_SLOTS[c.class] ?? 4;
-      const pct = (c.total / total) * 100;
-      return `<div class="class-row">
-        <span class="class-name"><i class="chip chip-cat-${slot}"></i>${c.class}</span>
-        <span class="bar-track"><span class="bar-fill" style="width:${pct.toFixed(1)}%;background:var(--series-${slot === 1 ? 'fwd' : slot === 2 ? 'rev' : slot})"></span></span>
-        <span class="class-n">${c.total}</span>
-      </div>`;
-    })
-    .join('');
+  container.replaceChildren(
+    ...classes
+      .filter((c) => c.total > 0)
+      .map((c) => {
+        const slot = CLASS_SLOTS[c.class] ?? 4;
+        const row = document.createElement('div');
+        row.className = 'class-row';
+        row.innerHTML = `<span class="class-name"><i class="chip chip-cat-${slot}"></i>${c.class}</span>
+          <span class="bar-track"><span class="bar-fill"></span></span>
+          <span class="class-n">${c.total.toLocaleString()}</span>`;
+        // CSSOM, not style attributes — the CSP has no 'unsafe-inline'.
+        const fill = row.querySelector('.bar-fill');
+        fill.style.width = `${((c.total / total) * 100).toFixed(1)}%`;
+        fill.style.background = `var(--series-${slot === 1 ? 'fwd' : slot === 2 ? 'rev' : slot})`;
+        return row;
+      })
+  );
 }
