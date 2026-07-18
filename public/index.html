@@ -102,6 +102,12 @@
                 <option value="1280x720">720p</option>
               </select>
             </label>
+            <label>fps
+              <select id="engine-fps" title="Requested camera frame rate. 60 fps needs 720p on most webcams (C922: 1080p30 / 720p60); the camera falls back to its best supported rate">
+                <option value="30">30</option>
+                <option value="60">60</option>
+              </select>
+            </label>
           </div>
           <div class="group" id="speed-settings">
             <label>Speed gates
@@ -159,9 +165,17 @@
           <div class="tile-value" id="tile-speed">–</div>
           <div class="tile-label">avg km/h · last 5 min</div>
         </div>
+        <div class="tile" id="tile-p85-wrap" hidden title="85th-percentile speed — the traffic-engineering standard for judging real road speeds">
+          <div class="tile-value" id="tile-p85">–</div>
+          <div class="tile-label">p85 km/h · 24 h</div>
+        </div>
+        <div class="tile" id="tile-max-wrap" hidden>
+          <div class="tile-value" id="tile-max">–</div>
+          <div class="tile-label">max km/h · 24 h</div>
+        </div>
         <div class="tile" id="tile-over-wrap" hidden>
           <div class="tile-value danger-value" id="tile-over">–</div>
-          <div class="tile-label">over limit · today</div>
+          <div class="tile-label" id="tile-over-label">over limit · today</div>
         </div>
       </div>
       <div class="direction-split">
@@ -169,6 +183,7 @@
         <span><span class="chip chip-rev"></span>reverse <b id="dir-rev">0</b></span>
         <span class="muted">today</span>
       </div>
+      <div class="class-mix" id="class-mix" hidden></div>
       <div class="sparkline-block">
         <h3>Cars per minute · last 30 min</h3>
         <div id="sparkline" class="chart chart-small"></div>
@@ -193,6 +208,8 @@
       <div id="speed-history" hidden>
         <h3 class="speed-title">Average speed · km/h</h3>
         <div id="speed-chart" class="chart chart-speed"></div>
+        <h3 class="speed-title">Speed distribution · last 24 h</h3>
+        <div id="speed-histogram" class="chart chart-speed"></div>
       </div>
       <details class="table-details">
         <summary>Table view</summary>

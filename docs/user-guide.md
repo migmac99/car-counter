@@ -74,9 +74,16 @@ enter the distance in meters and optionally a speed limit:
 - Each vehicle that crosses both gates gets a speed
   (distance ÷ time between crossings — robust to camera perspective) shown
   on its overlay label, red when over the limit.
-- The Live panel gains **avg km/h** and **over limit today** tiles, and the
-  History panel gains an average-speed chart with the limit drawn as a
-  reference line and over-limit buckets marked.
+- The gate distance also calibrates the scene, so **every tracked vehicle**
+  shows a live speed estimate (`~52 km/h`) and every crossing records one —
+  estimates are marked as such and are indicative, exact gate pairs are the
+  accurate record.
+- The Live panel gains **avg km/h**, **p85** (85th-percentile — the
+  traffic-engineering standard), **max** and **over limit** tiles plus a
+  vehicle-class mix bar; the History panel gains an average-speed chart
+  with the limit reference line and a **speed distribution histogram**.
+- Only velocities are stored — the **limit can be changed later** and all
+  recorded history is re-judged against the new value.
 
 Accuracy depends on the declared distance and on the gates being far enough
 apart that timing granularity doesn't matter (aim for ≥ 1.5 s of travel
@@ -149,7 +156,13 @@ automatically** on the next visit.
   stacked bar chart (blue = forward, green = reverse) with hover details and
   a table view underneath.
 
-Counts survive restarts — they live in `data/car-counter.sqlite`.
+Counts survive restarts — they live in `data/car-counter.sqlite`. Raw
+per-vehicle events are kept for 30 days (set `retentionDays` in the config
+to change it); older history is automatically compacted into per-minute
+aggregates, so the database stays tens of megabytes even on a busy highway.
+
+If a previous server instance is stuck holding the port, `bun killme` frees
+it (`bun dev` runs it automatically before starting).
 
 ## Installing as an app (PWA)
 

@@ -15,6 +15,10 @@
   --border: #e4e4e7;
   --series-fwd: #e76e50;
   --series-rev: #2a9d90;
+  /* categorical slots 3-4 (vehicle classes) — validated with the palette
+     script against this surface (all checks pass, light + dark) */
+  --series-3: #6d7fd8;
+  --series-4: #b8842c;
   --accent: #18181b;
   --accent-fg: #fafafa;
   --danger: #dc2626;
@@ -34,6 +38,8 @@
     --border: rgba(255, 255, 255, 0.1);
     --series-fwd: #2662d9;
     --series-rev: #2aa87e;
+    --series-3: #b8842c;
+    --series-4: #c65cd9;
     --accent: #fafafa;
     --accent-fg: #18181b;
     --danger: #ef4444;
@@ -267,6 +273,18 @@ input[type='checkbox'] { accent-color: var(--accent); }
 }
 .chip-fwd { background: var(--series-fwd); }
 .chip-rev { background: var(--series-rev); }
+.chip-cat-1 { background: var(--series-fwd); }
+.chip-cat-2 { background: var(--series-rev); }
+.chip-cat-3 { background: var(--series-3); }
+.chip-cat-4 { background: var(--series-4); }
+
+/* Vehicle-class mix: one labeled proportion bar per class */
+.class-mix { display: grid; gap: 0.35rem; margin-top: 0.75rem; }
+.class-row { display: grid; grid-template-columns: 6.5rem 1fr 3.5rem; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
+.class-row .bar-track { height: 10px; border-radius: 5px; background: var(--muted-bg); overflow: hidden; }
+.class-row .bar-fill { height: 100%; border-radius: 5px; }
+.class-row .class-n { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.class-row .class-name { display: flex; align-items: center; gap: 0.4rem; }
 
 .sparkline-block { margin-top: 1rem; }
 .sparkline-block h3 { margin-bottom: 0.3rem; }

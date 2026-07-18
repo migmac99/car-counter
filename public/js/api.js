@@ -84,6 +84,10 @@ export const fetchHistory = (bucket, from, to) => {
   return getJson(`/api/stats/history?${params}`);
 };
 
+export const fetchSpeeds = () => getJson('/api/stats/speeds');
+
+export const fetchClasses = () => getJson('/api/stats/classes');
+
 export const fetchConfig = () => getJson('/api/config');
 
 let saveTimer = null;

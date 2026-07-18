@@ -32,7 +32,7 @@ import {
 } from '../public/js/yolox.js';
 import { Tracker } from '../public/js/tracker.js';
 import { LineCounter } from '../public/js/counter.js';
-import { SpeedMatcher } from '../public/js/speed.js';
+import { SpeedMatcher, gateCalibration, historyKmh } from '../public/js/speed.js';
 import { pointInPolygon, boxCenter, zoneMaxDims, plausibleVehicle } from '../public/js/geometry.js';
 import { nightFromLuma, effectiveNight, trackingTuning, meanLuma } from '../public/js/scene.js';
 
@@ -342,6 +342,7 @@ export class CountingEngine {
     this.speedMatcher.configure(config.speed ?? {});
     this.counters ??= new Map();
     const seen = new Set();
+    const pxLines = [];
     for (const line of config.lines ?? []) {
       seen.add(line.id);
       let counter = this.counters.get(line.id);
@@ -352,12 +353,16 @@ export class CountingEngine {
       counter.hysteresis = Math.max(6, frame.h * 0.012) * tuning.hysteresisScale;
       const a = { x: line.a.x * frame.w, y: line.a.y * frame.h };
       const b = { x: line.b.x * frame.w, y: line.b.y * frame.h };
+      pxLines.push({ id: line.id, a, b });
       const prev = counter.line;
       const same =
         prev && prev.a.x === a.x && prev.a.y === a.y && prev.b.x === b.x && prev.b.y === b.y;
       if (!same) counter.setLine({ a, b });
     }
     for (const id of [...this.counters.keys()]) if (!seen.has(id)) this.counters.delete(id);
+    // Gate separation calibrates px→m, giving EVERY track a live km/h
+    // estimate (gate-pair timing stays the precise measurement).
+    this.pxPerMeter = gateCalibration(pxLines, config.speed ?? {});
     this.zones = (config.zones ?? [])
       .map((z) => z.points.map((p) => ({ x: p.x * frame.w, y: p.y * frame.h })))
       .filter((pts) => pts.length >= 3);
@@ -464,6 +469,15 @@ export class CountingEngine {
       ? detections.filter((d) => this.zones.some((poly) => pointInPolygon(boxCenter(d.bbox), poly)))
       : detections;
     const tracks = this.tracker.update(inZone, now);
+    // Continuous velocity for every confirmed track: median step speed over
+    // the recent path — robust to the centroid teleports that box flapping
+    // causes (verified: velocity-EMA read 126 km/h on a 46.8 km/h car).
+    if (this.pxPerMeter > 0) {
+      for (const t of tracks) {
+        if (!t.confirmed) continue;
+        t.estKmh = historyKmh(t.history, this.pxPerMeter) ?? t.estKmh;
+      }
+    }
     const liveIds = new Set(tracks.map((t) => t.id));
     for (const [lineId, counter] of this.counters) {
       for (const c of counter.update(tracks, now)) {
@@ -473,6 +487,12 @@ export class CountingEngine {
           track.kmh = measured.kmh;
           track.over = measured.over;
         }
+        // Every crossing records a velocity: the exact gate-pair value when
+        // available, else the calibrated estimate (est flag). `over` is
+        // stored for back-compat but stats re-evaluate against the current
+        // limit, so the limit can be changed after the fact.
+        const est = !measured && track?.estKmh >= 1 ? Math.round(track.estKmh * 10) / 10 : null;
+        const limit = this.speedMatcher.limitKmh;
         this.#queue.push({
           ts: c.ts,
           direction: c.direction,
@@ -481,7 +501,11 @@ export class CountingEngine {
           trackId: c.trackId,
           line: lineId,
           source: 'engine',
-          ...(measured ? { speed: measured.kmh, over: measured.over } : {}),
+          ...(measured
+            ? { speed: measured.kmh, over: measured.over }
+            : est != null
+              ? { speed: est, over: limit > 0 && est > limit, est: true }
+              : {}),
         });
         this.state.counted += 1;
       }
@@ -500,6 +524,7 @@ export class CountingEngine {
       confirmed: t.confirmed,
       kmh: t.kmh,
       over: t.over,
+      estKmh: t.estKmh == null ? undefined : Math.round(t.estKmh),
       vx: t.vx,
       vy: t.vy,
       history: t.history.slice(-15).map((p) => ({ x: p.x, y: p.y })),

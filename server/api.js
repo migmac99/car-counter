@@ -23,8 +23,25 @@ function validateEvent(e, now) {
   if (e.line != null && (typeof e.line !== 'string' || e.line.length > 64)) return 'invalid line';
   if (e.speed != null && !(e.speed > 0 && e.speed < 400)) return 'invalid speed';
   if (e.over != null && typeof e.over !== 'boolean') return 'invalid over';
+  if (e.est != null && typeof e.est !== 'boolean') return 'invalid est';
   if (e.source != null && (typeof e.source !== 'string' || e.source.length > 64)) return 'invalid source';
   return null;
+}
+
+/** Speed limit + retention as currently configured — stats evaluate against
+ *  these at query time (only velocities are stored, so both can change
+ *  retroactively). */
+function statsSettings(store) {
+  const config = store.getConfig('app') ?? {};
+  return { limitKmh: Number(config.speed?.limitKmh) || 0 };
+}
+
+function parseTsParam(query, name) {
+  const raw = query.get(name);
+  if (raw == null) return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) throw new ApiError(400, `${name} must be epoch ms`);
+  return n;
 }
 
 /** Route table: { 'METHOD /path': (store, { query, body }) => result } */
@@ -45,21 +62,29 @@ export const routes = {
     return { inserted };
   },
 
-  'GET /api/stats/summary': (store) => store.summary(),
+  'GET /api/stats/summary': (store) => store.summary(statsSettings(store)),
 
   'GET /api/stats/history': (store, { query }) => {
     const bucket = query.get('bucket') ?? 'minute';
     if (!['minute', 'hour', 'day'].includes(bucket))
       throw new ApiError(400, "bucket must be 'minute', 'hour' or 'day'");
-    const parseTs = (name) => {
-      const raw = query.get(name);
-      if (raw == null) return undefined;
-      const n = Number(raw);
-      if (!Number.isFinite(n)) throw new ApiError(400, `${name} must be epoch ms`);
-      return n;
-    };
-    return store.history({ bucket, from: parseTs('from'), to: parseTs('to') });
+    return store.history({
+      bucket,
+      from: parseTsParam(query, 'from'),
+      to: parseTsParam(query, 'to'),
+      ...statsSettings(store),
+    });
   },
+
+  'GET /api/stats/speeds': (store, { query }) =>
+    store.speedStats({
+      from: parseTsParam(query, 'from'),
+      to: parseTsParam(query, 'to'),
+      limitKmh: statsSettings(store).limitKmh,
+    }),
+
+  'GET /api/stats/classes': (store, { query }) =>
+    store.classStats({ from: parseTsParam(query, 'from'), to: parseTsParam(query, 'to') }),
 
   'GET /api/config': (store) => store.getConfig('app') ?? {},
 

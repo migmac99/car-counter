@@ -47,6 +47,7 @@ const refs = {
   dimBtn: $('dim-btn'),
   deleteShapeBtn: $('delete-shape-btn'),
   engineSize: $('engine-size'),
+  engineFps: $('engine-fps'),
   gateA: $('gate-a'),
   gateB: $('gate-b'),
   gateMeters: $('gate-meters'),
@@ -77,6 +78,13 @@ const refs = {
   tileSpeedWrap: $('tile-speed-wrap'),
   tileOver: $('tile-over'),
   tileOverWrap: $('tile-over-wrap'),
+  tileOverLabel: $('tile-over-label'),
+  tileP85: $('tile-p85'),
+  tileP85Wrap: $('tile-p85-wrap'),
+  tileMax: $('tile-max'),
+  tileMaxWrap: $('tile-max-wrap'),
+  classMix: $('class-mix'),
+  speedHistogram: $('speed-histogram'),
   speedHistory: $('speed-history'),
   speedChart: $('speed-chart'),
   dirFwd: $('dir-fwd'),
@@ -967,6 +975,7 @@ refs.engineBtn.addEventListener('click', async () => {
       running: !engineRunning(),
       device: refs.engineDevice.value || '0',
       size: refs.engineSize.value || '1920x1080',
+      fps: Number(refs.engineFps.value) || 30,
     });
     applyEngineUi();
   } catch (err) {
@@ -1212,6 +1221,7 @@ if ('serviceWorker' in navigator) {
       refs.engineDevice.value = saved;
       if (refs.engineDevice.value !== saved) refs.engineDevice.selectedIndex = 0;
       if (savedEngine.size) refs.engineSize.value = savedEngine.size;
+      if (savedEngine.fps) refs.engineFps.value = String(savedEngine.fps);
     } catch {}
   }
 

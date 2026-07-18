@@ -1,5 +1,12 @@
-import { fetchSummary, fetchHistory } from './api.js';
-import { renderStackedBars, renderSparkline, renderSpeedLine, renderTable } from './charts.js';
+import { fetchSummary, fetchHistory, fetchSpeeds, fetchClasses } from './api.js';
+import {
+  renderStackedBars,
+  renderSparkline,
+  renderSpeedLine,
+  renderTable,
+  renderHistogram,
+  renderClassMix,
+} from './charts.js';
 
 const SUMMARY_POLL_MS = 4000;
 const HISTORY_POLL_MS = 15_000;
@@ -69,9 +76,13 @@ export class StatsUi {
 
     this.refreshSummary();
     this.refreshHistory();
+    this.refreshAnalytics();
     setInterval(() => this.refreshSummary(), SUMMARY_POLL_MS);
     setInterval(() => this.refreshHistory(), HISTORY_POLL_MS);
+    setInterval(() => this.refreshAnalytics(), HISTORY_POLL_MS);
   }
+
+  #lastSpeeds = null;
 
   #fillRangeOptions() {
     this.refs.rangeSelect.innerHTML = RANGES[this.#bucket]
@@ -141,6 +152,30 @@ export class StatsUi {
     }
   }
 
+  /** Deeper analytics on their own cadence: distribution, p85, class mix. */
+  async refreshAnalytics() {
+    const { refs } = this;
+    const speedActive = this.speedInfo().active;
+    try {
+      const classes = await fetchClasses();
+      renderClassMix(refs.classMix, classes.classes);
+    } catch {}
+    refs.tileP85Wrap.hidden = !speedActive;
+    refs.tileMaxWrap.hidden = !speedActive;
+    if (!speedActive) return;
+    try {
+      const sp = await fetchSpeeds();
+      this.#lastSpeeds = sp;
+      refs.tileP85.textContent = sp.p85Kmh ?? '–';
+      refs.tileMax.textContent = sp.maxKmh ?? '–';
+      refs.tileOverLabel.textContent =
+        sp.overPct != null ? `over limit · today (${sp.overPct}% of 24 h)` : 'over limit · today';
+      if (!refs.speedHistogram.parentElement.hidden) {
+        renderHistogram(refs.speedHistogram, sp.histogram, sp.limitKmh);
+      }
+    } catch {}
+  }
+
   async refreshHistory() {
     const now = Date.now();
     try {
@@ -165,6 +200,11 @@ export class StatsUi {
     const { active, limitKmh } = this.speedInfo();
     const hasSpeed = active && buckets.some((b) => b.avgKmh != null);
     this.refs.speedHistory.hidden = !hasSpeed;
-    if (hasSpeed) renderSpeedLine(this.refs.speedChart, buckets, fmt, limitKmh);
+    if (hasSpeed) {
+      renderSpeedLine(this.refs.speedChart, buckets, fmt, limitKmh);
+      if (this.#lastSpeeds) {
+        renderHistogram(this.refs.speedHistogram, this.#lastSpeeds.histogram, this.#lastSpeeds.limitKmh);
+      }
+    }
   }
 }

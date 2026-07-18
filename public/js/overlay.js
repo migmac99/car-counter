@@ -190,7 +190,14 @@ export class Overlay {
       ctx.stroke();
     }
     if (t.confirmed) {
-      const speed = t.kmh != null ? ` · ${t.kmh} km/h` : '';
+      // Measured (gate-pair) speed is exact; the calibrated per-track
+      // estimate is prefixed with ~.
+      const speed =
+        t.kmh != null
+          ? ` · ${t.kmh} km/h`
+          : t.estKmh != null
+            ? ` · ~${Math.round(t.estKmh)} km/h`
+            : '';
       const color = t.over ? '#f87171' : TRACK_COLOR;
       this.#label(`${t.class} #${t.id}${speed}`, x, y - 6 * scale, color, scale);
     }

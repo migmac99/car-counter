@@ -211,11 +211,28 @@ intervals (< 150 ms or > 2 min) are discarded. Verified against a synthetic
 46.8 km/h vehicle: measured 46.1 km/h (−1.5 %); on the tiled 1080p region
 path, 48.6/46.9 km/h (within 4 %).
 
-**Known limitation:** speed pairing requires the *same track id* at both
-gates. On zones wide enough to need several tiles, a vehicle occasionally
-hands identity to a new track mid-pass (a seam flap at the wrong moment) —
-the count is unaffected (each crossing still counts once), but that pass
-yields no speed sample. Compact zones (a single tile) don't exhibit this.
+**Velocity for every vehicle.** The gate separation also calibrates a
+pixels-per-meter scale (`gateCalibration`), giving EVERY confirmed track a
+continuous km/h estimate — shown as `~52 km/h` on its label and recorded on
+crossing events with an `est` flag when no exact gate-pair measurement
+exists. The estimator is the **median of per-step speeds** over the last
+~0.9 s of the track's smoothed path (`historyKmh`): detector box flapping
+teleports the centroid for a frame, which made a velocity-EMA estimate read
+126 km/h on a ground-truth 46.8 km/h car; the median discards spike frames
+and reads within ~8 % (measured 49.8–51.1). Estimates are indicative — a
+single global scale ignores perspective — while gate-pair timing remains
+the accurate record (±2 %).
+
+Only velocities are stored; **`over` is evaluated against the limit at
+query time**, so changing the speed limit reclassifies all history within
+the retention window.
+
+**Known limitation:** exact speed pairing requires the *same track id* at
+both gates. On zones wide enough to need several tiles, a vehicle
+occasionally hands identity to a new track mid-pass (a seam flap at the
+wrong moment) — the count is unaffected, and since every crossing now
+records the calibrated estimate, the pass still contributes speed data
+(flagged `est`) instead of vanishing from the statistics.
 
 ## Auto-detected roads
 

@@ -26,8 +26,10 @@ request, body limit 512 KB).
       "confidence": 0.91,         // optional — 0..1
       "trackId": 17,              // optional — integer, for debugging
       "line": "line-3f9a2b",      // optional — id of the counting line that fired (≤ 64 chars)
-      "speed": 46.1,              // optional — measured km/h (0 < speed < 400)
-      "over": true,               // optional — speed exceeded the configured limit
+      "speed": 46.1,              // optional — km/h (0 < speed < 400)
+      "over": true,               // optional — speed exceeded the limit in force at capture
+      "est": false,               // optional — true when speed is the calibrated per-track
+                                  // estimate rather than an exact gate-pair measurement
       "source": "default"         // optional — camera/site label (≤ 64 chars)
     }
   ]
@@ -85,10 +87,50 @@ Zero-filled, time-bucketed counts (server-local time). Defaults and caps:
 }
 ```
 
-`avgKmh` is null in buckets with no speed-measured vehicles; `over` counts
-vehicles that exceeded the limit in force when they were measured.
+`avgKmh` is null in buckets with no speed-measured vehicles. `over` counts
+vehicles whose stored velocity exceeds the **currently configured** limit —
+only velocities are stored, so changing the limit reclassifies history.
+(Buckets older than the raw-event retention window come from rollups, which
+keep counts/avg/max but cannot re-derive per-vehicle `over` — it reads 0
+there.)
 
 `ts` is the bucket's start (epoch ms); `key` is its local-time label.
+
+## `GET /api/stats/speeds?from=<ms>&to=<ms>`
+
+Speed analytics over raw events (default: last 24 h), evaluated against the
+current limit:
+
+```json
+{
+  "n": 412, "avgKmh": 47.2, "minKmh": 22.1, "maxKmh": 93.4,
+  "p50Kmh": 46.0, "p85Kmh": 58.5,
+  "over": 37, "overPct": 9.0, "limitKmh": 50,
+  "histogram": [ { "fromKmh": 40, "toKmh": 45, "n": 88 }, "…" ],
+  "byClass": [ { "class": "car", "n": 391, "avgKmh": 47.5, "maxKmh": 93.4, "over": 35 }, "…" ]
+}
+```
+
+`p85Kmh` (the 85th-percentile speed) is the traffic-engineering standard for
+judging real road speeds. Spans the raw-retention window only.
+
+## `GET /api/stats/classes?from=<ms>&to=<ms>`
+
+Vehicle-class mix (default: today), merging raw events and rollups:
+
+```json
+{ "classes": [ { "class": "car", "fwd": 26009, "rev": 18044, "total": 44053 }, "…" ] }
+```
+
+## Storage & retention
+
+Raw per-vehicle events are kept for `config.retentionDays` (default 30,
+minimum 3); a 6-hourly maintenance job rolls older events into per-minute
+aggregates (counts, speed sum/max per direction and class) and prunes the
+raw rows — at highway volumes this caps the database at tens of megabytes
+instead of gigabytes per year. Counts and speed averages/maxima survive
+forever; per-vehicle drill-down (percentiles, limit re-evaluation) spans the
+retention window.
 
 ## `GET /api/config` / `PUT /api/config`
 

@@ -141,3 +141,33 @@ test('static file serving with security headers', async () => {
   assert.equal((await fetch(`${base}/../etc/passwd`)).status, 404, 'traversal blocked');
   assert.equal((await fetch(`${base}/nope.html`)).status, 404);
 });
+
+test('speed analytics endpoint: percentiles + histogram vs the configured limit', async () => {
+  const now = Date.now();
+  await fetch(`${base}/api/config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ speed: { gateA: 'a', gateB: 'b', meters: 26, limitKmh: 50 } }),
+  });
+  await post('/api/events', {
+    events: [
+      { ts: now - 1000, direction: 'fwd', speed: 40 },
+      { ts: now - 2000, direction: 'fwd', speed: 48, est: true },
+      { ts: now - 3000, direction: 'fwd', speed: 62 },
+    ],
+  });
+  const sp = await (await fetch(`${base}/api/stats/speeds`)).json();
+  assert.equal(sp.limitKmh, 50, 'limit comes from the live config');
+  assert.ok(sp.n >= 3);
+  assert.ok(sp.over >= 1, '62 km/h is over the configured 50');
+  assert.ok(Array.isArray(sp.histogram) && sp.histogram.length > 0);
+  assert.ok(sp.p85Kmh >= sp.p50Kmh, 'p85 >= p50');
+});
+
+test('class mix endpoint aggregates per class and direction', async () => {
+  const classes = await (await fetch(`${base}/api/stats/classes?from=0`)).json();
+  assert.ok(Array.isArray(classes.classes));
+  const car = classes.classes.find((c) => c.class === 'car');
+  assert.ok(car && car.total >= 1);
+  assert.equal(car.total, car.fwd + car.rev);
+});

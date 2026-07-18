@@ -165,7 +165,20 @@ export function startServer({
     buf.set(p.jpeg, 8);
     server.publish('engine', buf);
   }, 50);
-  return { server, store: app.store, engine: app.engine, previewTimer };
+  // Storage maintenance: roll raw events older than 48 h into per-minute
+  // aggregates and prune raw rows past the retention window (default 30
+  // days, config.retentionDays) — counts/avg/max survive forever in a few
+  // hundred KB per day instead of raw gigabytes.
+  const maintain = () => {
+    try {
+      app.store.maintain(app.store.getConfig('app')?.retentionDays);
+    } catch (err) {
+      console.error('[maintain]', err.message);
+    }
+  };
+  maintain();
+  const maintainTimer = setInterval(maintain, 6 * 3600_000);
+  return { server, store: app.store, engine: app.engine, previewTimer, maintainTimer };
 }
 
 if (import.meta.main) {
@@ -173,6 +186,7 @@ if (import.meta.main) {
   // the listening socket and swaps the fetch handler in place. Close the
   // previous run's DB connection and register signal handlers only once.
   clearInterval(globalThis.__carCounter?.previewTimer);
+  clearInterval(globalThis.__carCounter?.maintainTimer);
   await globalThis.__carCounter?.engine?.dispose();
   globalThis.__carCounter?.store.close();
   globalThis.__carCounter = startServer();

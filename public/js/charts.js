@@ -315,3 +315,111 @@ export function renderTable(container, buckets, formatLabel, cap = 120) {
     <tbody>${cells}</tbody></table>
     ${buckets.filter((b) => b.total > 0).length > cap ? `<p class="muted">Showing the ${cap} most recent non-empty rows.</p>` : ''}`;
 }
+
+/**
+ * Speed distribution histogram (5 km/h bins) with the limit as a dashed
+ * reference line. Single series — magnitude only, so one hue and no legend.
+ * @param {Array} bins [{ fromKmh, toKmh, n }]
+ */
+export function renderHistogram(container, bins, limitKmh = 0) {
+  container.querySelector('svg')?.remove();
+  container.querySelector('.chart-empty')?.remove();
+  const width = Math.max(container.clientWidth, 320);
+  const height = 130;
+  const plotW = width - MARGIN.l - MARGIN.r;
+  const plotH = height - MARGIN.t - MARGIN.b;
+  const svg = el('svg', { viewBox: `0 0 ${width} ${height}`, width, height, role: 'img' });
+  const tip = tooltipFor(container);
+
+  if (bins.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'chart-empty muted';
+    empty.textContent = 'No speed measurements yet.';
+    container.append(svg);
+    container.append(empty);
+    return;
+  }
+  // Continuous km/h x-domain, padded one bin each side.
+  const binW = bins[0].toKmh - bins[0].fromKmh;
+  const x0 = Math.max(0, bins[0].fromKmh - binW);
+  const x1 = Math.max(bins.at(-1).toKmh + binW, limitKmh + binW);
+  const yMax = niceMax(Math.max(0, ...bins.map((b) => b.n)));
+  grid(svg, plotW, plotH, yMax, 3);
+  const xOf = (kmh) => MARGIN.l + ((kmh - x0) / (x1 - x0)) * plotW;
+  const yOf = (v) => MARGIN.t + plotH - (v / yMax) * plotH;
+
+  for (const b of bins) {
+    const x = xOf(b.fromKmh) + SEG_GAP / 2;
+    const w = Math.max(1, xOf(b.toKmh) - xOf(b.fromKmh) - SEG_GAP);
+    const h = plotH - (yOf(b.n) - MARGIN.t);
+    svg.append(
+      el('path', {
+        d: topCappedRect(x, yOf(b.n), w, Math.max(1, h), CAP_RADIUS),
+        fill: 'var(--series-fwd)',
+      })
+    );
+    const hover = el('rect', { x: xOf(b.fromKmh), y: MARGIN.t, width: xOf(b.toKmh) - xOf(b.fromKmh), height: plotH, class: 'hover-col' });
+    hover.addEventListener('pointerenter', () =>
+      tip.show(
+        xOf(b.fromKmh + binW / 2),
+        yOf(b.n),
+        `<div class="tt-title">${b.fromKmh}–${b.toKmh} km/h</div><div class="tt-row">vehicles <b>${b.n}</b></div>`
+      )
+    );
+    hover.addEventListener('pointerleave', tip.hide);
+    svg.append(hover);
+  }
+
+  if (limitKmh > 0) {
+    svg.append(el('line', {
+      x1: xOf(limitKmh), x2: xOf(limitKmh), y1: MARGIN.t, y2: MARGIN.t + plotH,
+      stroke: 'var(--danger)', 'stroke-width': 1, 'stroke-dasharray': '5 4',
+    }));
+    const lbl = el('text', {
+      x: xOf(limitKmh) + 4, y: MARGIN.t + 10, fill: 'var(--danger)', 'font-size': 10,
+    });
+    lbl.textContent = `limit ${limitKmh}`;
+    svg.append(lbl);
+  }
+
+  // x axis: km/h ticks at nice intervals
+  const tickStep = x1 - x0 > 120 ? 40 : 20;
+  for (let v = Math.ceil(x0 / tickStep) * tickStep; v <= x1; v += tickStep) {
+    const t = el('text', {
+      x: xOf(v), y: height - 6, 'text-anchor': 'middle', fill: 'var(--muted)', 'font-size': 11,
+    });
+    t.textContent = String(v);
+    svg.append(t);
+  }
+  container.append(svg);
+}
+
+// Fixed class→slot assignment: color follows the entity, never the rank.
+const CLASS_SLOTS = { car: 1, truck: 2, bus: 3, motorcycle: 4 };
+
+/**
+ * Vehicle-class mix as labeled proportion bars (HTML, not SVG — each row
+ * carries its name and count, so identity is never color-alone).
+ * @param {Array} classes [{ class, total }]
+ */
+export function renderClassMix(container, classes) {
+  const total = classes.reduce((a, c) => a + c.total, 0);
+  if (total === 0) {
+    container.innerHTML = '';
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
+  container.innerHTML = classes
+    .filter((c) => c.total > 0)
+    .map((c) => {
+      const slot = CLASS_SLOTS[c.class] ?? 4;
+      const pct = (c.total / total) * 100;
+      return `<div class="class-row">
+        <span class="class-name"><i class="chip chip-cat-${slot}"></i>${c.class}</span>
+        <span class="bar-track"><span class="bar-fill" style="width:${pct.toFixed(1)}%;background:var(--series-${slot === 1 ? 'fwd' : slot === 2 ? 'rev' : slot})"></span></span>
+        <span class="class-n">${c.total}</span>
+      </div>`;
+    })
+    .join('');
+}

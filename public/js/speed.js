@@ -8,6 +8,54 @@
 const MIN_DT_MS = 150; // faster than this between gates is a tracking glitch
 const MAX_DT_MS = 120_000;
 
+/**
+ * Pixels-per-meter scale derived from the two gate lines: their midpoints
+ * are a known real-world distance apart. This turns EVERY track's pixel
+ * velocity into a continuous km/h estimate — approximate (a single global
+ * scale ignores perspective) but live for all vehicles, not only those that
+ * complete both gates. Gate-pair timing remains the accurate measurement.
+ * Lines are in pixel space: [{id, a: {x, y}, b: {x, y}}].
+ */
+export function gateCalibration(lines, { gateA, gateB, meters } = {}) {
+  const m = Number(meters);
+  if (!gateA || !gateB || gateA === gateB || !(m > 0)) return 0;
+  const a = lines.find((l) => l.id === gateA);
+  const b = lines.find((l) => l.id === gateB);
+  if (!a || !b) return 0;
+  const mid = (l) => ({ x: (l.a.x + l.b.x) / 2, y: (l.a.y + l.b.y) / 2 });
+  const ma = mid(a);
+  const mb = mid(b);
+  const dist = Math.hypot(mb.x - ma.x, mb.y - ma.y);
+  return dist > 0 ? dist / m : 0;
+}
+
+/**
+ * Robust km/h estimate from a track's recent path: the MEDIAN of per-step
+ * speeds over the last `windowMs`. Detector box flapping (stretched↔tight
+ * interpretations at region edges) teleports the centroid for a frame or
+ * two, which doubles any velocity-EMA estimate; a median over ~20 steps
+ * discards those spike frames outright. History: [{x, y, t}].
+ */
+export function historyKmh(history, pxPerMeter, windowMs = 900, minSpanMs = 350) {
+  if (!(pxPerMeter > 0) || !history || history.length < 2) return null;
+  const end = history[history.length - 1];
+  const steps = [];
+  for (let i = history.length - 1; i > 0; i--) {
+    const b = history[i];
+    const a = history[i - 1];
+    if (end.t - a.t > windowMs) break;
+    const dt = b.t - a.t;
+    if (dt > 0) steps.push(Math.hypot(b.x - a.x, b.y - a.y) / dt); // px/ms
+  }
+  if (steps.length < 5) return null;
+  const first = history[history.length - 1 - steps.length];
+  if (end.t - first.t < minSpanMs) return null;
+  steps.sort((p, q) => p - q);
+  const median = steps[Math.floor(steps.length / 2)];
+  const kmh = ((median * 1000) / pxPerMeter) * 3.6;
+  return kmh < 400 ? kmh : null;
+}
+
 export class SpeedMatcher {
   #gateA = null;
   #gateB = null;

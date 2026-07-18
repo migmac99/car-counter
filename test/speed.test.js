@@ -1,6 +1,6 @@
 import { test } from 'bun:test';
 import assert from 'node:assert/strict';
-import { SpeedMatcher } from '../public/js/speed.js';
+import { SpeedMatcher, gateCalibration, historyKmh } from '../public/js/speed.js';
 
 function configured(limitKmh = 50) {
   const m = new SpeedMatcher();
@@ -67,4 +67,30 @@ test('prune drops half-completed measurements for dead tracks', () => {
   m.observe(7, 'la', 1_000);
   m.prune(new Set());
   assert.equal(m.observe(7, 'lb', 3_000), null, 'gate A crossing was pruned');
+});
+
+test('gateCalibration: px-per-meter from gate midpoint separation', () => {
+  const lines = [
+    { id: 'g1', a: { x: 100, y: 100 }, b: { x: 100, y: 300 } },
+    { id: 'g2', a: { x: 360, y: 100 }, b: { x: 360, y: 300 } },
+  ];
+  assert.equal(gateCalibration(lines, { gateA: 'g1', gateB: 'g2', meters: 26 }), 10, '260 px / 26 m');
+  assert.equal(gateCalibration(lines, { gateA: 'g1', gateB: 'g1', meters: 26 }), 0, 'same gate: inactive');
+  assert.equal(gateCalibration(lines, { gateA: 'g1', gateB: 'gX', meters: 26 }), 0, 'missing line');
+  assert.equal(gateCalibration(lines, { gateA: 'g1', gateB: 'g2', meters: 0 }), 0, 'no distance');
+});
+
+test('historyKmh: constant motion through the calibration', () => {
+  // 10 px/m scale, 13 px per 100 ms step = 130 px/s = 46.8 km/h
+  const history = Array.from({ length: 12 }, (_, i) => ({ x: i * 13, y: 0, t: i * 100 }));
+  assert.ok(Math.abs(historyKmh(history, 10) - 46.8) < 1e-9);
+  assert.equal(historyKmh(history, 0), null, 'uncalibrated: no estimate');
+  assert.equal(historyKmh(history.slice(0, 3), 10), null, 'too little history');
+});
+
+test('historyKmh: median discards centroid-teleport spike frames', () => {
+  const history = Array.from({ length: 12 }, (_, i) => ({ x: i * 13, y: 0, t: i * 100 }));
+  history[7] = { ...history[7], x: history[7].x + 160 }; // one-frame box flap
+  const est = historyKmh(history, 10);
+  assert.ok(Math.abs(est - 46.8) < 2, `spike ignored, got ${est}`);
 });
