@@ -69,7 +69,10 @@ can't see through.
 Speed uses two **gate lines** a known real-world distance apart (the
 distance between two road markings, lamp posts, etc. — measure it or read
 it off satellite imagery). In **Settings → Speed gates** pick the two lines,
-enter the distance in meters and optionally a speed limit:
+enter the distance in meters and optionally a speed limit. No measurement
+handy? **Estimate** derives one from passing traffic — the median detected
+car is assumed to be 4.6 m long, which calibrates pixels to meters
+(±15 % or so; refine with a real measurement when you can):
 
 - Each vehicle that crosses both gates gets a speed
   (distance ÷ time between crossings — robust to camera perspective) shown
@@ -143,6 +146,10 @@ automatically** on the next visit.
   Auto measures frame brightness and switches by itself.
 - **Count**: both directions, forward only, or reverse only — affects the
   displayed totals; both directions are always recorded.
+- **Overlay sync**: how far behind live the preview image runs; the overlay
+  renders tracks at that moment so boxes sit on the cars. **Auto** derives
+  it from the camera frame rate — drag the slider only if boxes visibly
+  lead (increase) or trail (decrease) the vehicles.
 - **Delete all history…**: wipes every stored event (asks for confirmation).
 
 ## Reading the statistics

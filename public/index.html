@@ -116,7 +116,15 @@
               <select id="gate-b" title="Second gate line"></select>
             </label>
             <label>distance <input id="gate-meters" type="number" min="1" max="2000" step="0.5" class="num" /> m</label>
+            <button id="estimate-meters" title="Estimate the gate distance from passing traffic: the median detected car is assumed to be 4.6 m long, which calibrates pixels to meters. Refine with a real measurement when you can.">Estimate</button>
             <label>limit <input id="speed-limit" type="number" min="0" max="300" step="5" class="num" /> km/h</label>
+          </div>
+          <div class="group">
+            <label>Overlay sync
+              <input id="overlay-lag" type="range" min="0" max="600" step="10" title="How far behind live the preview image runs. If boxes lead the cars, increase; if they trail, decrease." />
+              <span id="overlay-lag-value" class="muted">auto</span>
+            </label>
+            <label class="check" title="Derive the offset from the camera frame rate automatically"><input id="overlay-lag-auto" type="checkbox" checked /> auto</label>
           </div>
           <div class="group">
             <label>Preset

@@ -176,7 +176,10 @@ export class Overlay {
     }
   }
 
-  #drawTrack(t, scale) {
+  #drawTrack(track, scale) {
+    // Browser-pipeline tracks carry a smoothed display box; engine
+    // snapshots arrive pre-smoothed.
+    const t = track.display ? { ...track, bbox: track.display } : track;
     const { ctx } = this;
     const [x, y, w, h] = t.bbox;
     ctx.strokeStyle = t.confirmed ? TRACK_COLOR : 'rgba(248, 250, 252, 0.35)';

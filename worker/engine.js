@@ -83,6 +83,7 @@ export class CountingEngine {
       startedAt: null,
     };
     this.tracks = [];
+    this.carSamples = [];
     this.previewPath = join(tmpdir(), `car-counter-preview-${process.pid}.jpg`);
   }
 
@@ -138,6 +139,9 @@ export class CountingEngine {
     const gen = ++this.#generation;
     this.#sceneWarmupUntil = Date.now() + 2500;
     this.state.night = false; // day until measured otherwise (real night re-enters in one frame)
+    this.carSamples = []; // px scale may change with the capture size
+    this.state.carLenPx = undefined;
+    this.state.carLenN = 0;
     const config = (await this.#getConfig()) ?? {};
 
     const modelName = YOLOX_VARIANTS[config.model] ? config.model : 'yolox-tiny';
@@ -322,6 +326,13 @@ export class CountingEngine {
       this.camFrames = 0;
       this.perfCount = 0;
       this.perfStart = Date.now();
+      // Median moving-car length in full-frame px, for gate-distance
+      // estimation (needs a meaningful sample first).
+      this.state.carLenN = this.carSamples.length;
+      if (this.carSamples.length >= 30) {
+        const sorted = [...this.carSamples].sort((a, b) => a - b);
+        this.state.carLenPx = Math.round(sorted[sorted.length >> 1]);
+      }
     }, 2000);
 
     this.state.running = true;
@@ -478,6 +489,15 @@ export class CountingEngine {
         t.estKmh = historyKmh(t.history, this.pxPerMeter) ?? t.estKmh;
       }
     }
+    // Auto-calibration samples: the dominant-axis extent of moving cars.
+    // Their real-world median (~4.6 m) lets the UI estimate the gate
+    // distance from traffic alone.
+    for (const t of tracks) {
+      if (!t.confirmed || t.class !== 'car') continue;
+      if (Math.hypot(t.vx ?? 0, t.vy ?? 0) < 0.02) continue; // < 20 px/s: not clearly moving
+      this.carSamples.push(Math.abs(t.vx ?? 0) >= Math.abs(t.vy ?? 0) ? t.bw : t.bh);
+      if (this.carSamples.length > 400) this.carSamples.shift();
+    }
     const liveIds = new Set(tracks.map((t) => t.id));
     for (const [lineId, counter] of this.counters) {
       for (const c of counter.update(tracks, now)) {
@@ -519,7 +539,8 @@ export class CountingEngine {
     this.state.tracksTs = now;
     this.tracks = tracks.filter((t) => t.misses <= 2).map((t) => ({
       id: t.id,
-      bbox: t.bbox,
+      bbox: t.display ?? t.bbox, // smoothed for the overlay; logic uses raw
+
       class: t.class,
       confirmed: t.confirmed,
       kmh: t.kmh,

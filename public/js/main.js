@@ -51,7 +51,11 @@ const refs = {
   gateA: $('gate-a'),
   gateB: $('gate-b'),
   gateMeters: $('gate-meters'),
+  estimateMeters: $('estimate-meters'),
   speedLimit: $('speed-limit'),
+  overlayLag: $('overlay-lag'),
+  overlayLagValue: $('overlay-lag-value'),
+  overlayLagAuto: $('overlay-lag-auto'),
   zoom: $('zoom'),
   zoomValue: $('zoom-value'),
   minScore: $('min-score'),
@@ -113,6 +117,7 @@ const state = {
   model: 'yolox-tiny',
   sceneMode: 'auto', // 'auto' | 'day' | 'night'
   dimOutside: false, // darken the image outside zones (focus mode)
+  previewLagMs: null, // overlay sync offset; null = derive from camera fps
 };
 let measuredNight = false;
 
@@ -263,6 +268,7 @@ function currentConfig() {
     model: state.model,
     sceneMode: state.sceneMode,
     dimOutside: state.dimOutside,
+    previewLagMs: state.previewLagMs,
   };
 }
 
@@ -299,6 +305,8 @@ function applyConfig(config) {
   state.sceneMode = ['auto', 'day', 'night'].includes(config.sceneMode) ? config.sceneMode : 'auto';
   state.dimOutside = Boolean(config.dimOutside);
   refs.dimBtn.classList.toggle('active', state.dimOutside);
+  state.previewLagMs = Number.isFinite(config.previewLagMs) ? config.previewLagMs : null;
+  syncOverlayLagUi();
   applySpeedConfig();
   refs.minScore.value = state.minScore;
   refs.modelSelect.value = state.model;
@@ -688,10 +696,20 @@ setInterval(updatePerfChip, 2000);
 // live traffic at 24 fps (measured optimum ≈ 200-250 ms; the model gives
 // 237). Override from the console via window.__previewLagMs if needed.
 const previewLagMs = () => {
-  if (window.__previewLagMs != null) return window.__previewLagMs;
+  if (window.__previewLagMs != null) return window.__previewLagMs; // debug hook
+  if (state.previewLagMs != null) return state.previewLagMs; // Settings slider
   const frameInterval = engineStatus?.camFps > 0 ? 1000 / engineStatus.camFps : 42;
   return 130 + 2.5 * frameInterval;
 };
+
+function syncOverlayLagUi() {
+  const auto = state.previewLagMs == null;
+  refs.overlayLagAuto.checked = auto;
+  refs.overlayLag.disabled = auto;
+  const effective = Math.round(previewLagMs());
+  refs.overlayLag.value = String(effective);
+  refs.overlayLagValue.textContent = auto ? `auto (${effective} ms)` : `${effective} ms`;
+}
 
 function engineTracksNow() {
   const tracks = engineStatus.tracks ?? [];
@@ -1026,6 +1044,47 @@ refs.dimBtn.addEventListener('click', () => {
   state.dimOutside = !state.dimOutside;
   refs.dimBtn.classList.toggle('active', state.dimOutside);
   persistConfig();
+});
+refs.overlayLag.addEventListener('input', () => {
+  state.previewLagMs = Number(refs.overlayLag.value);
+  syncOverlayLagUi();
+});
+refs.overlayLag.addEventListener('change', persistConfig);
+refs.overlayLagAuto.addEventListener('change', () => {
+  state.previewLagMs = refs.overlayLagAuto.checked ? null : Math.round(previewLagMs());
+  syncOverlayLagUi();
+  persistConfig();
+});
+// Auto-calibration: the median detected car is ~4.6 m long, which turns the
+// engine's pixel measurements into meters — good enough to get speed
+// working (±15 %); refine with a real measurement when possible.
+const AVG_CAR_LENGTH_M = 4.6;
+refs.estimateMeters.addEventListener('click', () => {
+  const carPx = engineStatus?.carLenPx;
+  const frame = engineStatus?.frame;
+  if (!engineRunning() || !frame) {
+    alert('Start server counting first — the estimate is measured from passing traffic.');
+    return;
+  }
+  if (!carPx) {
+    alert(`Not enough passing cars measured yet (${engineStatus?.carLenN ?? 0}/30). Leave the engine counting for a minute and try again.`);
+    return;
+  }
+  const a = state.lines.find((l) => l.id === refs.gateA.value);
+  const b = state.lines.find((l) => l.id === refs.gateB.value);
+  if (!a || !b || a === b) {
+    alert('Pick two different gate lines first.');
+    return;
+  }
+  const mid = (l) => ({ x: ((l.a.x + l.b.x) / 2) * frame.w, y: ((l.a.y + l.b.y) / 2) * frame.h });
+  const ma = mid(a);
+  const mb = mid(b);
+  const gatePx = Math.hypot(mb.x - ma.x, mb.y - ma.y);
+  const meters = Math.round((gatePx / (carPx / AVG_CAR_LENGTH_M)) * 2) / 2;
+  refs.gateMeters.value = String(meters);
+  refs.gateMeters.dispatchEvent(new Event('input', { bubbles: true }));
+  refs.gateMeters.dispatchEvent(new Event('change', { bubbles: true }));
+  setStatus(`gate distance estimated at ${meters} m from ${engineStatus.carLenN} passing cars — refine with a real measurement when you can`, engineRunning());
 });
 
 // --- settings ---

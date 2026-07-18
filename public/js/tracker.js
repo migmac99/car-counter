@@ -160,6 +160,8 @@ export class Tracker {
     return {
       id: this.#nextId++,
       bbox: det.bbox,
+      bw: det.bbox[2], // EMA-smoothed box dimensions
+      bh: det.bbox[3],
       class: det.class,
       score: det.score,
       cx: c.x,
@@ -189,6 +191,15 @@ export class Tracker {
       track.vy = g * ((track.cy - prevY) / dt) + (1 - g) * track.vy;
     }
     track.bbox = det.bbox;
+    // DISPLAY box: EMA dimensions centered on the EMA centroid. Raw
+    // per-frame boxes flap between stretched and tight interpretations of
+    // the same vehicle (measured 119↔440 px wide on one car), which reads
+    // as jumpy detections. Tracking logic (association, nesting) stays on
+    // the raw box — smoothing it shifted counts in E2E.
+    const bs = 0.35;
+    track.bw = bs * det.bbox[2] + (1 - bs) * (track.bw ?? det.bbox[2]);
+    track.bh = bs * det.bbox[3] + (1 - bs) * (track.bh ?? det.bbox[3]);
+    track.display = [track.cx - track.bw / 2, track.cy - track.bh / 2, track.bw, track.bh];
     track.class = det.class;
     track.score = det.score;
     track.hits += 1;
