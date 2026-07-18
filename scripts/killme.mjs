@@ -17,7 +17,11 @@ const say = (msg) => !quiet && console.log(msg);
 
 function listeners() {
   try {
-    return execSync(`lsof -ti :${port}`, { stdio: ['ignore', 'pipe', 'ignore'] })
+    // -nP skips name resolution — without it lsof can take close to a
+    // minute on a busy machine.
+    return execSync(`lsof -nP -iTCP:${port} -sTCP:LISTEN -t`, {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
       .toString()
       .trim()
       .split('\n')
@@ -48,4 +52,4 @@ for (const pid of listeners()) {
 }
 await Bun.sleep(200);
 if (listeners().length === 0) say(`:${port} is free`);
-else console.error(`:${port} is STILL held — check manually with: lsof -i :${port}`);
+else console.error(`:${port} is STILL held — check manually with: lsof -nP -i :${port}`);
