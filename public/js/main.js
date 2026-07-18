@@ -621,7 +621,15 @@ function updatePerfChip() {
     const s = engineStatus;
     const night = s.night ? ' · night' : '';
     const cam = s.camFps != null ? ` cam ${s.camFps}/s ·` : '';
-    refs.perf.textContent = `${s.frame.w}×${s.frame.h} ·${cam} det ${s.detPerSec}/s · ${s.detMs} ms · ${s.ep} (server)${night}`;
+    // What the model actually sees: the zone/zoom region, not the camera.
+    const r = s.regionBox;
+    const cropped = r && (r.w !== s.frame.w || r.h !== s.frame.h);
+    const roi = cropped ? `zone ${r.w}×${r.h}` : `${s.frame.w}×${s.frame.h}`;
+    const tiles = s.tiles > 1 ? ` ·${s.tiles} tiles` : '';
+    refs.perf.textContent = `${roi}${tiles} ·${cam} det ${s.detPerSec}/s · ${s.detMs} ms · ${s.ep} (server)${night}`;
+    refs.perf.title = cropped
+      ? `camera ${s.frame.w}×${s.frame.h} → detection region ${r.w}×${r.h} at (${r.x}, ${r.y})`
+      : '';
     refs.perf.hidden = false;
     // Low camera fps at night is exposure physics; flag it only in daylight.
     refs.perf.classList.toggle('warn', !s.night && s.camFps > 0 && s.camFps < 15);
@@ -664,7 +672,11 @@ function engineTracksNow() {
   const ts = engineStatus.tracksTs;
   if (!ts) return tracks;
   const frameInterval = engineStatus.camFps > 0 ? 1000 / engineStatus.camFps : 33;
-  const lag = Math.min(400, 70 + frameInterval / 2);
+  // Boxes must sit on the PREVIEW's frame, which trails live by roughly one
+  // preview interval plus encode/transport. Track data itself is near-live
+  // over the WebSocket, so this offset is the preview's latency, not the
+  // data's.
+  const lag = Math.min(400, 100 + frameInterval / 2);
   const dt = Math.max(-800, Math.min(900, Date.now() - ts - lag));
   return tracks.map((t) => ({
     ...t,
@@ -828,12 +840,12 @@ function applyEngineUi() {
 }
 
 let lastEngineError = null;
+let engineWsFresh = 0; // last time the realtime socket delivered
+let lastEnginePoll = 0;
 
-async function pollEngine() {
-  try {
-    const next = await fetchEngine();
-    const changed = Boolean(next.running) !== engineRunning();
-    engineStatus = next.available === false ? null : next;
+function ingestEngineStatus(next) {
+    const changed = Boolean(next?.running) !== engineRunning();
+    engineStatus = !next || next.available === false ? null : next;
     if (changed) applyEngineUi();
     // Engine problems must be VISIBLE — a silent retry loop reads as
     // "nothing works". Camera-permission failures get remediation text.
@@ -855,7 +867,51 @@ async function pollEngine() {
         if (engineRunning()) applyEngineUi();
       }
     }
+}
+
+async function pollEngine() {
+  // The WebSocket is the realtime path; while it delivers, polling relaxes
+  // into a 2 s safety net (config drift, socket-invisible errors).
+  const now = Date.now();
+  if (now - engineWsFresh < 1000 && now - lastEnginePoll < 2000) return;
+  lastEnginePoll = now;
+  try {
+    ingestEngineStatus(await fetchEngine());
   } catch {}
+}
+
+// Realtime channel: per-frame track snapshots plus status pushes. The UI
+// renders these the moment the server produces them — polling only backs
+// this up, it no longer paces the overlay.
+function connectEngineWs() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}/api/ws`);
+  ws.onmessage = (e) => {
+    let m;
+    try {
+      m = JSON.parse(e.data);
+    } catch {
+      return;
+    }
+    engineWsFresh = Date.now();
+    if (m.type === 'tracks') {
+      if (engineStatus) {
+        Object.assign(engineStatus, {
+          tracks: m.tracks,
+          tracksTs: m.tracksTs,
+          counted: m.counted,
+          night: m.night,
+        });
+      }
+    } else if (m.type === 'status') {
+      ingestEngineStatus(m.status);
+    }
+  };
+  ws.onclose = () => {
+    engineWsFresh = 0;
+    setTimeout(connectEngineWs, 3000);
+  };
+  ws.onerror = () => ws.close();
 }
 
 refs.engineBtn.addEventListener('click', async () => {
@@ -1087,6 +1143,7 @@ if ('serviceWorker' in navigator) {
     refs.engineBtn.hidden = false;
     refs.engineSettings.hidden = false;
     setInterval(pollEngine, 300);
+    connectEngineWs();
     applyEngineUi();
     if (!engineRunning()) {
       refs.videoHint.textContent =

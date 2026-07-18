@@ -29,6 +29,10 @@ export class EngineProxy {
       const m = e.data;
       if (m.type === 'status') {
         this.#status = { available: true, ...m.status };
+        this.onPush?.({ type: 'status', status: this.#status });
+      } else if (m.type === 'tracks') {
+        Object.assign(this.#status, m.t);
+        this.onPush?.({ type: 'tracks', ...m.t });
       } else if (m.type === 'events') {
         try {
           this.#store.insertEvents(m.events);
@@ -74,7 +78,24 @@ export class EngineProxy {
   }
 
   async start(source) {
+    // Fresh worker per start: `bun --hot` swaps main-thread modules but
+    // cannot reach inside a running worker thread, so a long-lived worker
+    // would keep counting with stale engine code forever.
+    if (this.#worker) {
+      try {
+        await this.#rpc('stop'); // child processes outlive terminate()
+      } catch {}
+      this.#respawn();
+    }
     await this.#rpc('start', { source });
+  }
+
+  #respawn() {
+    const worker = this.#worker;
+    this.#worker = null;
+    for (const p of this.#pending.values()) p.reject(new Error('engine worker replaced'));
+    this.#pending.clear();
+    worker?.terminate();
   }
 
   async stop() {

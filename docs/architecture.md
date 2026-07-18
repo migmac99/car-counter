@@ -137,7 +137,7 @@ The server **hosts the counting pipeline itself** — in a dedicated worker
 thread, so per-frame work (pixel conversion, tensor marshaling) can never
 add latency to HTTP handling (measured: <1 ms API latency at p95 under full
 1080p load). `CountingEngine` captures
-frames with ffmpeg (AVFoundation webcam or a video file), runs YOLOX on
+frames with ffmpeg (webcam or a video file), runs YOLOX on
 `onnxruntime-node` (CoreML on Apple silicon → CPU fallback), and counts with
 the **same pure modules the browser uses** — `tracker.js`, `counter.js`,
 `speed.js`, `yolox.js` decode. Events go straight into the Store; ffmpeg
@@ -146,6 +146,25 @@ exposes as `GET /api/preview` (snapshot) and `GET /api/preview.mjpeg`
 (low-latency push stream), so the web UI can display the road, draw
 shapes and show live tracks **without ever touching the camera** — the page
 is a pure window onto the server.
+
+**Camera capture — the native helper.** ffmpeg's `avfoundation` input can
+only select a camera's *uncompressed* pixel formats, and USB-2 UVC webcams
+cap uncompressed transfer hard: a C922 delivers **5 fps at 1080p** (10 fps
+at 720p) that way, silently, even when 30 fps is requested. The cameras'
+30 fps modes are MJPEG-only — which is what browsers negotiate via
+getUserMedia, and why the same camera "worked at 30" in the browser.
+`worker/capture.swift` (compiled to `worker/.bin/cc-capture` by `bun i`;
+~100 lines) opens the camera through AVCaptureSession, which picks those
+MJPEG modes, and streams decoded NV12 frames into ffmpeg's stdin — same
+filter chain from there on. Measured: 5.5 fps → **24-30 fps** at 1080p.
+Without swiftc the engine falls back to the plain ffmpeg path.
+
+**Realtime channel.** `GET /api/ws` upgrades to a WebSocket on which the
+server pushes a track snapshot **per processed frame** (~24-30/s) plus
+status every 250 ms; the UI renders them with velocity dead-reckoning at
+display refresh, so overlay boxes sit on the cars instead of trailing them.
+HTTP polling remains as a 2 s safety net (and the sole path if the socket
+drops — it reconnects itself).
 
 - `GET /api/engine` — status: running, model, execution provider, det/s,
   latency, counted, live track snapshot for the overlay.

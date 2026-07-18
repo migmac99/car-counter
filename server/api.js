@@ -67,6 +67,10 @@ export const routes = {
     if (typeof body !== 'object' || body === null || Array.isArray(body))
       throw new ApiError(400, 'config must be a JSON object');
     if (rawBody.length > MAX_CONFIG_BYTES) throw new ApiError(413, 'config too large');
+    // The `engine` block is server-managed (PUT /api/engine); UI config
+    // saves never carry it and must not wipe engine enablement/autostart.
+    const saved = store.getConfig('app')?.engine;
+    if (saved && body.engine === undefined) body.engine = saved;
     store.setConfig('app', body);
     engine?.applyConfig(); // pick up new lines/zones/view/model immediately
     return { ok: true };

@@ -130,9 +130,12 @@ Names: 1–40 characters — letters, digits, spaces, `-`, `_`.
 
 | Endpoint | Effect |
 |---|---|
-| `GET /api/engine` | Status: `{available, running, model, ep, frame, detPerSec, detMs, counted, tracks[], source, error}` — or `{available: false, reason}` |
+| `GET /api/engine` | Status: `{available, running, model, ep, frame, regionBox, tiles, camFps, detPerSec, detMs, counted, night, tracks[], source, error}` — or `{available: false, reason}` |
 | `PUT /api/engine` | `{running: true|false, device?, size?, fps?, input?, loop?}` — start/stop capture; camera enablement persists and auto-starts with the server |
-| `GET /api/preview` | Latest full-frame JPEG from the engine (no-store; 404 when not running) |
+| `GET /api/engine/devices` | Cameras as the server sees them: `{devices: [{index, name}]}` |
+| `GET /api/preview` | Latest preview JPEG from the engine (no-store; 404 when not running) |
+| `GET /api/preview.mjpeg` | Multipart MJPEG push stream of the preview (what the UI displays) |
+| `GET /api/ws` | WebSocket. Server → client only: `{type: "tracks", tracks, tracksTs, counted, night}` per processed frame (~camera rate); `{type: "status", status}` every 250 ms. The UI's realtime overlay feed — polling is only its fallback |
 
 ## `DELETE /api/events?confirm=yes`
 

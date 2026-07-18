@@ -21,6 +21,8 @@ const engine = new CountingEngine({
 
 postMessage({ type: 'previewPath', path: engine.previewPath });
 setInterval(() => postMessage({ type: 'status', status: engine.status }), 250);
+// Per-frame track snapshots ride straight through to WebSocket clients.
+engine.onTracks = (t) => postMessage({ type: 'tracks', t });
 
 onmessage = async (e) => {
   const m = e.data;

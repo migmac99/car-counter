@@ -68,3 +68,30 @@ for (const shard of shardPaths) {
   await download(`${MODEL_BASE}/${shard}`, join('model', shard));
 }
 console.log(`done: runtime + model (${shardPaths.length} weight shards) in public/vendor/`);
+
+// --- native capture helper (macOS) ---
+// ffmpeg's avfoundation input reaches only a camera's uncompressed formats
+// (USB-2 webcams: ~5 fps at 1080p). The Swift helper uses AVCaptureSession,
+// which selects the camera's MJPEG 30 fps modes like browsers do. Optional:
+// without it the engine falls back to ffmpeg's (slow) camera path.
+if (process.platform === 'darwin') {
+  const { execFileSync } = await import('node:child_process');
+  const repo = dirname(dirname(fileURLToPath(import.meta.url)));
+  const src = join(repo, 'worker', 'capture.swift');
+  const bin = join(repo, 'worker', '.bin', 'cc-capture');
+  const mtime = async (p) => (await stat(p).catch(() => null))?.mtimeMs ?? 0;
+  if ((await mtime(bin)) > (await mtime(src))) {
+    console.log('skip  worker/.bin/cc-capture (up to date)');
+  } else {
+    try {
+      execFileSync('xcrun', ['--find', 'swiftc'], { stdio: 'ignore' });
+      await mkdir(join(repo, 'worker', '.bin'), { recursive: true });
+      execFileSync('xcrun', ['--sdk', 'macosx', 'swiftc', '-O', src, '-o', bin], {
+        stdio: 'inherit',
+      });
+      console.log('built worker/.bin/cc-capture (30 fps camera capture)');
+    } catch {
+      console.log('note: swiftc unavailable — camera capture will use ffmpeg (slower fps)');
+    }
+  }
+}

@@ -58,7 +58,13 @@ export function createApp({ dbFile = join(ROOT, 'data', 'car-counter.sqlite') } 
   const serveStatic = makeStaticHandler(join(ROOT, 'public'));
   const engine = engineSupported ? new EngineProxy(store) : null;
 
-  async function handle(req, url) {
+  async function handle(req, url, server) {
+    // Realtime channel: the engine publishes per-frame track snapshots and
+    // status changes to every connected UI (topic 'engine').
+    if (url.pathname === '/api/ws') {
+      if (server?.upgrade(req)) return null;
+      return new Response('websocket endpoint', { status: 426 });
+    }
     if (!url.pathname.startsWith('/api/')) {
       if (req.method !== 'GET' && req.method !== 'HEAD') {
         return new Response(null, { status: 405 });
@@ -101,8 +107,9 @@ export function createApp({ dbFile = join(ROOT, 'data', 'car-counter.sqlite') } 
     }
   }
 
-  async function fetch(req) {
-    const res = await handle(req, new URL(req.url));
+  async function fetch(req, server) {
+    const res = await handle(req, new URL(req.url), server);
+    if (!res) return undefined; // upgraded to a WebSocket
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
     return res;
   }
@@ -125,7 +132,16 @@ export function startServer({
     // prompt. Bun's default of 10 s killed them. 255 is Bun's maximum.
     idleTimeout: 255,
     fetch: app.fetch,
+    websocket: {
+      open(ws) {
+        ws.subscribe('engine');
+      },
+      message() {}, // one-way: server → UI
+    },
   });
+  if (app.engine) {
+    app.engine.onPush = (msg) => server.publish('engine', JSON.stringify(msg));
+  }
   return { server, store: app.store, engine: app.engine };
 }
 
@@ -144,7 +160,7 @@ if (import.meta.main) {
     if (saved?.enabled) {
       engine
         .start(saved)
-        .then(() => console.log(`engine: counting from ${engine.state.source} (${engine.state.model}/${engine.state.ep})`))
+        .then(() => console.log(`engine: counting from ${engine.status.source} (${engine.status.model}/${engine.status.ep})`))
         .catch((err) => console.error(`engine: could not start (${err.message}) — start it from the web UI`));
     } else {
       console.log('engine: available — enable server-side counting from the web UI (or PUT /api/engine)');

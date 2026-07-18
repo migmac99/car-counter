@@ -97,9 +97,12 @@ outgrow in-browser inference.
   shows the live numbers.
 - Cameras are asked for 1080p @ 30 fps; the chip warns below 15 fps, where
   motion blur (long exposures) starts hurting recall more than any software
-  can recover. Note that in the dark, webcams genuinely deliver fewer
-  frames (a C922 drops to ~5-7 fps at night from long exposure) — the
-  engine paces to real frames (`-fps_mode passthrough` for cameras;
+  can recover. If the server sees ~5 fps at 1080p in daylight, that is the
+  USB-2 uncompressed cap — the native capture helper (see
+  `architecture.md`) exists precisely to reach the camera's MJPEG 30 fps
+  modes; make sure `worker/.bin/cc-capture` built during `bun i`. In real
+  darkness, long exposure can still genuinely lower fps. The engine paces
+  to real frames (`-fps_mode passthrough` for direct-ffmpeg cameras;
   AVFoundation otherwise pads to a constant rate with duplicates, measured
   115 fps of identical frames from a 30 fps camera).
 

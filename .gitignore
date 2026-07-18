@@ -14,3 +14,4 @@ node_modules/
 
 # graphify knowledge graph — derived, rebuild with graphify.watch
 graphify-out/
+worker/.bin/

@@ -14,6 +14,7 @@
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,7 +37,12 @@ import { pointInPolygon, boxCenter, zoneMaxDims, plausibleVehicle } from '../pub
 import { nightFromLuma, effectiveNight, trackingTuning, meanLuma } from '../public/js/scene.js';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const PREVIEW_FPS = 12;
+const PREVIEW_FPS = 15;
+// Native capture helper (compiled from capture.swift by `bun i`). ffmpeg's
+// avfoundation input can only pick a camera's uncompressed formats, which
+// USB-2 webcams cap at ~5 fps @1080p; AVCaptureSession reaches the MJPEG
+// 30 fps modes. When the helper exists, cameras stream through it.
+const CAPTURE_HELPER = join(dirname(fileURLToPath(import.meta.url)), '.bin', 'cc-capture');
 
 export { checkRequirements, listDevices } from './devices.js';
 
@@ -44,6 +50,7 @@ export class CountingEngine {
   #getConfig;
   #postEvents;
   #ffmpeg = null;
+  #capture = null;
   #session = null;
   #busy = false;
   #queue = [];
@@ -54,6 +61,11 @@ export class CountingEngine {
   // Each boot gets a generation; async callbacks from superseded runs
   // (a killed ffmpeg's late 'close', stale timers) self-discard on mismatch.
   #generation = 0;
+  // Cameras start dark while auto-exposure converges; judging the scene in
+  // that window flips night mode on and — thanks to hysteresis — it can
+  // stick there all day (measured: enter at boot, scene settles at luma 76,
+  // exit needs > 90).
+  #sceneWarmupUntil = 0;
 
   constructor({ getConfig, postEvents }) {
     this.#getConfig = getConfig;
@@ -124,6 +136,8 @@ export class CountingEngine {
 
   async #boot() {
     const gen = ++this.#generation;
+    this.#sceneWarmupUntil = Date.now() + 2500;
+    this.state.night = false; // day until measured otherwise (real night re-enters in one frame)
     const config = (await this.#getConfig()) ?? {};
 
     const modelName = YOLOX_VARIANTS[config.model] ? config.model : 'yolox-tiny';
@@ -184,9 +198,13 @@ export class CountingEngine {
             };
           })()
         : { x: 0, y: 0, w: frame.w, h: frame.h };
+    const useHelper = !src.input && existsSync(CAPTURE_HELPER);
     const inputArgs = src.input
       ? ['-re', ...(src.loop ? ['-stream_loop', '-1'] : []), '-i', src.input]
-      : ['-f', 'avfoundation', '-framerate', String(src.fps), '-video_size', src.size, '-i', src.device];
+      : useHelper
+        ? ['-f', 'rawvideo', '-pixel_format', 'nv12', '-video_size', src.size,
+           '-framerate', String(src.fps), '-use_wallclock_as_timestamps', '1', '-i', 'pipe:0']
+        : ['-f', 'avfoundation', '-framerate', String(src.fps), '-video_size', src.size, '-i', src.device];
 
     // The preview mirrors THE VIEW: when zoomed, it is the zoomed crop at
     // full preview resolution (sharp), not a scaled full frame. The UI
@@ -212,10 +230,26 @@ export class CountingEngine {
         '-vf', previewFilter, '-r', String(PREVIEW_FPS), '-q:v', '5',
         '-update', '1', '-atomic_writing', '1', '-f', 'image2', this.previewPath,
       ],
-      { stdio: ['ignore', 'pipe', 'pipe'] }
+      { stdio: [useHelper ? 'pipe' : 'ignore', 'pipe', 'pipe'] }
     );
     let stderrTail = '';
     this.#ffmpeg.stderr.on('data', (d) => (stderrTail = (stderrTail + d).slice(-400)));
+    if (useHelper) {
+      this.#capture = spawn(
+        CAPTURE_HELPER,
+        ['--index', src.device, '--size', src.size, '--fps', String(src.fps)],
+        { stdio: ['ignore', 'pipe', 'pipe'] }
+      );
+      this.#capture.stderr.on('data', (d) => (stderrTail = (stderrTail + d).slice(-400)));
+      this.#ffmpeg.stdin.on('error', () => {}); // EPIPE when ffmpeg goes first
+      this.#capture.stdout.pipe(this.#ffmpeg.stdin);
+      this.#capture.on('close', () => {
+        if (gen !== this.#generation) return;
+        // Camera gone: closing ffmpeg's stdin lets its own close handler
+        // run the shared retry logic.
+        try { this.#ffmpeg?.stdin.end(); } catch {}
+      });
+    }
 
     // Zero-churn frame assembly: chunks copy into a fixed accumulator (no
     // Buffer.concat — at 1080p that was hundreds of multi-MB copies per
@@ -268,6 +302,8 @@ export class CountingEngine {
       }
       // Camera loss (sleep/unplug): retry until stopped explicitly.
       this.state.error = `capture ended (${code}): ${stderrTail.trim() || 'camera lost'} — retrying`;
+      this.#capture?.kill('SIGTERM'); // ffmpeg died first: don't leak the grabber
+      this.#capture = null;
       clearTimeout(this.#retryTimer);
       this.#retryTimer = setTimeout(() => {
         if (gen === this.#generation) this.#boot().catch((err) => (this.state.error = err.message));
@@ -341,7 +377,7 @@ export class CountingEngine {
         clearTimeout(this.#restartTimer);
         this.#restartTimer = setTimeout(() => {
           if (gen === this.#generation && this.state.running) {
-            this.#ffmpeg?.kill('SIGTERM');
+            this.#killProcs();
             this.#boot().catch((err) => (this.state.error = err.message));
           }
         }, 1200);
@@ -382,10 +418,9 @@ export class CountingEngine {
     // The region buffer is all content — no letterbox bias.
     const luma = meanLuma(rgb, 3);
     const wasNight = this.state.night ?? false;
-    const night = effectiveNight(
-      this.lastConfig?.sceneMode ?? 'auto',
-      nightFromLuma(luma, wasNight)
-    );
+    const measured =
+      Date.now() < this.#sceneWarmupUntil ? wasNight : nightFromLuma(luma, wasNight);
+    const night = effectiveNight(this.lastConfig?.sceneMode ?? 'auto', measured);
     if (night !== wasNight) {
       this.state.night = night;
       if (this.lastConfig) this.#applyCountingConfig(this.lastConfig);
@@ -469,6 +504,14 @@ export class CountingEngine {
       vy: t.vy,
       history: t.history.slice(-15).map((p) => ({ x: p.x, y: p.y })),
     }));
+    // Realtime hook: the host pushes this to WebSocket clients per frame,
+    // so the UI overlay runs at capture rate instead of poll rate.
+    this.onTracks?.({
+      tracksTs: now,
+      tracks: this.tracks,
+      counted: this.state.counted,
+      night: this.state.night ?? false,
+    });
   }
 
   async #flush() {
@@ -482,16 +525,20 @@ export class CountingEngine {
     }
   }
 
+  #killProcs() {
+    this.#capture?.kill('SIGTERM');
+    this.#capture = null;
+    this.#ffmpeg?.kill('SIGTERM');
+    this.#ffmpeg = null;
+  }
+
   async stop() {
     this.#generation += 1; // invalidate every callback of the previous run
     clearTimeout(this.#retryTimer);
     clearTimeout(this.#restartTimer);
     clearInterval(this.#flushTimer);
     this.#flushTimer = null;
-    if (this.#ffmpeg) {
-      this.#ffmpeg.kill('SIGTERM');
-      this.#ffmpeg = null;
-    }
+    this.#killProcs();
     this.state.running = false;
     this.tracks = [];
     await this.#flush();
