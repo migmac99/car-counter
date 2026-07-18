@@ -1,11 +1,44 @@
 # Detection, tracking and counting
 
-The computer-vision pipeline runs per frame in the browser:
+The computer-vision pipeline runs per frame — server-side in the engine
+worker (the normal mode; see `architecture.md`) or in the browser as a
+fallback. Both share the same modules (`yolox.js`, `tracker.js`,
+`counter.js`), so behavior is identical:
 
 ```
-video frame → detect (COCO-SSD) → filter (class, confidence, zone)
-            → track (IoU tracker) → count (line crossings) → event
+frame → region crop (zones) → tile → detect (YOLOX) → seam-merge + NMS
+      → filter (class, confidence, zone) → track → count (line crossings) → event
 ```
+
+## 0. Region capture & tiled inference — *the model sees your zones*
+
+The single biggest accuracy lever: **pixels outside your zones are never
+sent to the model.** The engine computes the union bounding box of all
+drawn zones (plus a small margin: 4 % horizontally, 20 % of the band
+height vertically, so vehicles entering the band are seen early), crops
+that region in ffmpeg, and scales it by a factor chosen to balance three
+constraints (`regionScale`): upscale at most 1.6× (beyond that is
+interpolation, not information), keep the region height within the model
+input (416 px), and fit the width within a 4-tile budget.
+
+A road band wider than one model input is covered by **overlapping tiles**
+(`planTiles`, 25 % overlap, right-aligned tail). Tiling creates a seam
+problem — a vehicle straddling two tiles appears as a clipped fragment in
+each — solved by *reconstruction, not suppression*: each detection is
+tagged with `clipLeft`/`clipRight` flags when it touches an inner tile
+edge (`clipFlags`), and `mergeSeamFragments` unions horizontally-adjacent
+clipped fragments of the same class (requiring ≥ 50 % vertical overlap so
+different lanes never merge) back into one full-width vehicle before NMS.
+
+Measured effect on a 1080p side-view road band (zone 22 % of frame
+height): effective resolution on the road ~2.5–3× versus full-frame
+letterboxing, and a distant-car recall that full-frame processing simply
+does not have. The engine restarts automatically (1.2 s debounce) when
+zones change, and the status chip reports `regionBox` and tile count.
+
+Without zones the region is the visible view crop (digital zoom), else
+the full frame — so drawing a tight road zone is both an accuracy *and* a
+performance feature.
 
 ## 1. Detection — `detector.js` (+ `yolox.js`)
 
@@ -35,7 +68,12 @@ outgrow in-browser inference.
   suppress at IoU 0.5, but different-class boxes only merge above IoU 0.7 —
   so a car partly hidden behind a truck survives as two vehicles, while one
   vehicle the model hedges between "car" and "truck" stays a single
-  detection instead of double-counting.
+  detection instead of double-counting. A third tier handles **nesting by
+  containment** (intersection ÷ smaller area): a same-class box ≥ 85 %
+  inside a bigger one is the same vehicle seen twice (stretched
+  frame-edge interpretation + tight interpretation), and a *different*-class
+  box ≥ 95 % swallowed is a fragment (a "truck" cabin inside the car's
+  box) — plain IoU misses both because the areas differ so much.
 - The detection crop is capped at the **model's own input size** (416/640),
   so 1080p → model input is a single resample.
 - Kept classes: `car`, `truck`, `bus`, `motorcycle` (user-filterable).
@@ -114,6 +152,13 @@ SORT/ByteTrack-style tracking, tuned for the counting task:
 4. **Lifecycle** — new confident detections open *tentative* tracks; a track
    is **confirmed** after `minHits = 3` matches (suppresses one-frame false
    positives) and dropped after `maxAgeMs = 1500` without a match.
+   Two anti-duplication rules keep one physical vehicle to one track:
+   a new detection **substantially inside a confirmed track's box**
+   (containment > 0.8, any class) cannot spawn a track — it is a fragment
+   of that vehicle; and if twin same-class tracks end up nested
+   (containment > 0.75, e.g. after a tile-seam flap), the
+   better-established one survives (`#pruneNestedTracks`). Temporal
+   identity catches what per-frame NMS can miss across frames.
 5. **Smoothing** — the track centroid is an EMA (α = 0.6 toward the new
    position), damping detector jitter before it reaches the counter. The
    last 40 positions are kept as the trail drawn in the overlay.
@@ -136,7 +181,13 @@ Per confirmed track, per frame:
    outside-the-band position → current position) must actually **intersect
    the drawn segment** (±8 % extent margin) — vehicles crossing the line's
    *extension* beyond its endpoints don't count.
-4. **Cooldown** (2 s per track) absorbs oscillation right after a count while
+4. **Trajectory gate** — the crossing direction must agree with the
+   track's *physical displacement* over the last 700 ms of history
+   (`historyDirection`). Smoothed instantaneous velocity flips sign under
+   a single teleporting association; 700 ms of accumulated displacement
+   does not. A track with too little history (< 250 ms span) or genuinely
+   ambiguous motion is given the benefit of the doubt.
+5. **Cooldown** (2 s per track) absorbs oscillation right after a count while
    still allowing a genuine return trip to count as `rev`.
 
 Each crossing emits `{ts, direction, class, confidence, trackId, line}` —
@@ -154,7 +205,14 @@ smoothing) hit both gate timestamps equally and cancel; the residual error
 is crossing-detection granularity (~1 frame per gate), so accuracy improves
 with gate separation — aim for ≥ 1.5 s of travel between gates. Implausible
 intervals (< 150 ms or > 2 min) are discarded. Verified against a synthetic
-46.8 km/h vehicle: measured 46.1 km/h (−1.5 %).
+46.8 km/h vehicle: measured 46.1 km/h (−1.5 %); on the tiled 1080p region
+path, 48.6/46.9 km/h (within 4 %).
+
+**Known limitation:** speed pairing requires the *same track id* at both
+gates. On zones wide enough to need several tiles, a vehicle occasionally
+hands identity to a new track mid-pass (a seam flap at the wrong moment) —
+the count is unaffected (each crossing still counts once), but that pass
+yields no speed sample. Compact zones (a single tile) don't exhibit this.
 
 ## Auto-detected roads
 
@@ -177,6 +235,12 @@ meaningful displacement and gives up after 30 s of quiet road.
 | Hysteresis | 1.2 % of height | `main.js` (`syncCounterLine`) | Wider dead band around the line |
 | `cooldownMs` | 2000 | `counter.js` | Longer immunity after each count |
 | `extentMargin` | 0.08 | `counter.js` | Wider effective line ends |
+| `DIRECTION_WINDOW_MS` | 700 | `counter.js` | Longer trajectory memory for the direction gate |
+| Region margin | 4 % / 20 % band | `engine.js` (`computeRegion`) | More context around zones, fewer pixels on the road |
+| Upscale cap | 1.6× | `yolox.js` (`regionScale`) | Interpolation past ~1.6× adds no information |
+| Tile overlap | 25 % of input | `yolox.js` (`planTiles`) | Fewer seam fragments, more tiles |
+| Seam-merge vertical overlap | 0.5 | `yolox.js` (`mergeSeamFragments`) | Stricter lane separation at seams |
+| Spawn containment | 0.8 | `tracker.js` (`#nestedInConfirmed`) | Stricter = fewer fragment tracks, risks missing a real nested vehicle |
 
 ## Practical accuracy tips
 

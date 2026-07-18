@@ -656,14 +656,16 @@ setInterval(updatePerfChip, 2000);
 
 // Engine tracks arrive a few hundred ms stale (poll + preview latency);
 // dead-reckoning them with their server-computed velocities keeps the boxes
-// glued to the cars at full display frame rate.
-const ENGINE_DISPLAY_LAG_MS = 250;
-
+// glued to the cars at full display frame rate. The render-time offset
+// adapts to the camera's real frame interval — at a night-time 5 fps the
+// preview lags far more than at 30 fps.
 function engineTracksNow() {
   const tracks = engineStatus.tracks ?? [];
   const ts = engineStatus.tracksTs;
   if (!ts) return tracks;
-  const dt = Math.max(-500, Math.min(900, Date.now() - ts - ENGINE_DISPLAY_LAG_MS));
+  const frameInterval = engineStatus.camFps > 0 ? 1000 / engineStatus.camFps : 33;
+  const lag = Math.min(400, 70 + frameInterval / 2);
+  const dt = Math.max(-800, Math.min(900, Date.now() - ts - lag));
   return tracks.map((t) => ({
     ...t,
     bbox: [t.bbox[0] + (t.vx ?? 0) * dt, t.bbox[1] + (t.vy ?? 0) * dt, t.bbox[2], t.bbox[3]],

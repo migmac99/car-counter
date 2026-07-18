@@ -1,5 +1,26 @@
 import { signedDistance, intersectionParams, positiveNormal } from './geometry.js';
 
+const DIRECTION_WINDOW_MS = 700;
+const DIRECTION_MIN_SPAN_MS = 250;
+
+/**
+ * Sustained travel direction along a line's normal, from trajectory history:
+ * displacement over the last ~700 ms divided by elapsed time (px/ms).
+ * Null when the track is too young to judge.
+ */
+function historyDirection(history, n) {
+  if (!history || history.length < 2) return null;
+  const nowPt = history[history.length - 1];
+  let past = history[0];
+  for (let i = history.length - 2; i >= 0; i--) {
+    past = history[i];
+    if (nowPt.t - history[i].t >= DIRECTION_WINDOW_MS) break;
+  }
+  const dt = nowPt.t - past.t;
+  if (dt < DIRECTION_MIN_SPAN_MS) return null;
+  return ((nowPt.x - past.x) * n.x + (nowPt.y - past.y) * n.y) / dt;
+}
+
 /**
  * Counts confirmed tracks crossing a directed counting line.
  *
@@ -63,7 +84,17 @@ export class LineCounter {
         const withinExtent =
           hit && hit.s >= -this.extentMargin && hit.s <= 1 + this.extentMargin;
         const cooled = now - state.lastCross >= this.cooldownMs;
-        if (track.confirmed && withinExtent && cooled) {
+        // Physics gate: the track's sustained direction of travel must agree
+        // with the crossing direction. Detector box snaps (tight box ↔
+        // motion-smear box) teleport the centroid backwards across a line
+        // for a frame — and even smoothed velocity flips under a large
+        // jump — so direction comes from ~700 ms of trajectory history,
+        // which no single-frame artifact can outvote.
+        const n = positiveNormal(a, b);
+        const motion = historyDirection(track.history, n);
+        const velocityAgrees =
+          motion === null || Math.abs(motion) < 0.005 || Math.sign(motion) === side;
+        if (track.confirmed && withinExtent && cooled && velocityAgrees) {
           events.push({
             trackId: track.id,
             direction: side > 0 ? 'fwd' : 'rev',

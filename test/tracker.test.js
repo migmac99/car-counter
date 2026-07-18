@@ -85,6 +85,33 @@ test('motion prediction bridges detection gaps for association', () => {
   assert.equal(tracks[0].id, id);
 });
 
+test('a detection nested inside a confirmed track cannot spawn a new track', () => {
+  const tracker = new Tracker({ minHits: 3 });
+  for (let i = 0; i < 4; i++) tracker.update([det(100 + i * 5, 100, 400, 200)], i * 50);
+  assert.ok(tracker.tracks[0].confirmed);
+  // A "truck" fragment inside the car's box appears alongside it…
+  const tracks = tracker.update(
+    [det(122, 100, 400, 200, 'car', 0.9), det(250, 150, 90, 90, 'truck', 0.6)],
+    200
+  );
+  assert.equal(tracks.length, 1, 'fragment suppressed, one vehicle, one track');
+});
+
+test('nested same-class twin tracks are pruned to the better-established one', () => {
+  const tracker = new Tracker({ minHits: 1 });
+  // Establish a track with several hits
+  for (let i = 0; i < 5; i++) tracker.update([det(100 + i * 5, 100, 200, 100)], i * 50);
+  const veteran = tracker.tracks[0].id;
+  // A twin detection nested inside the veteran's box spawns a new track…
+  tracker.update(
+    [det(125, 100, 200, 100, 'car', 0.9), det(150, 120, 60, 40, 'car', 0.8)],
+    300
+  );
+  // …and is pruned the same tick: one physical vehicle, one track.
+  assert.equal(tracker.tracks.length, 1);
+  assert.equal(tracker.tracks[0].id, veteran);
+});
+
 test('track history records the smoothed path', () => {
   const tracker = new Tracker({ historyLen: 5 });
   for (let i = 0; i < 10; i++) tracker.update([det(i * 20, 100)], i * 50);

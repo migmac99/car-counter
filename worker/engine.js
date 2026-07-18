@@ -18,7 +18,17 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ort from 'onnxruntime-node';
-import { YOLOX_CLASSES, YOLOX_VARIANTS, buildGrids, decode, nms } from '../public/js/yolox.js';
+import {
+  YOLOX_CLASSES,
+  YOLOX_VARIANTS,
+  buildGrids,
+  decode,
+  nms,
+  planTiles,
+  regionScale,
+  clipFlags,
+  mergeSeamFragments,
+} from '../public/js/yolox.js';
 import { Tracker } from '../public/js/tracker.js';
 import { LineCounter } from '../public/js/counter.js';
 import { SpeedMatcher } from '../public/js/speed.js';
@@ -26,7 +36,7 @@ import { pointInPolygon, boxCenter, zoneMaxDims, plausibleVehicle } from '../pub
 import { nightFromLuma, effectiveNight, trackingTuning, meanLuma } from '../public/js/scene.js';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const PREVIEW_FPS = 8;
+const PREVIEW_FPS = 12;
 
 export { checkRequirements, listDevices } from './devices.js';
 
@@ -115,7 +125,6 @@ export class CountingEngine {
   async #boot() {
     const gen = ++this.#generation;
     const config = (await this.#getConfig()) ?? {};
-    this.#configSnapshot = JSON.stringify({ view: config.view, model: config.model });
 
     const modelName = YOLOX_VARIANTS[config.model] ? config.model : 'yolox-tiny';
     const variant = YOLOX_VARIANTS[modelName];
@@ -142,7 +151,25 @@ export class CountingEngine {
     this.state.source = src.input ?? `camera ${src.device} (${src.size}@${src.fps})`;
     this.#applyCountingConfig(config); // needs frame dims for pixel-space shapes
 
-    // Same view semantics as the browser: detect on the zoomed crop only.
+    // Detection REGION: the zones' bounding band when zones exist (the model
+    // spends its pixels on the road, not the sky), else the zoomed view.
+    const region = computeRegion(config, frame);
+    this.#configSnapshot = snapshotOf(config, frame);
+    const f = regionScale(region.w, region.h, variant.size);
+    const scaledW = Math.max(2, Math.round(region.w * f) & ~1);
+    const scaledH = Math.max(2, Math.min(variant.size, Math.round(region.h * f)) & ~1);
+    this.region = { ...region, f, scaledW, scaledH };
+    this.tiles = planTiles(scaledW, variant.size);
+    this.state.regionBox = { x: region.x, y: region.y, w: region.w, h: region.h };
+    this.state.tiles = this.tiles.length;
+
+    const filter = [
+      `crop=${region.w}:${region.h}:${region.x}:${region.y}`,
+      `scale=${scaledW}:${scaledH}`,
+    ].join(',');
+
+    // The preview keeps showing the user's VIEW (zoom crop), independent of
+    // the detection region.
     const view = { z: 1, cx: 0.5, cy: 0.5, ...config.view };
     const crop =
       view.z > 1
@@ -157,21 +184,6 @@ export class CountingEngine {
             };
           })()
         : { x: 0, y: 0, w: frame.w, h: frame.h };
-    this.crop = crop;
-    this.scale = variant.size / Math.max(crop.w, crop.h);
-    const contentW = Math.max(2, Math.round(crop.w * this.scale) & ~1);
-    const contentH = Math.max(2, Math.round(crop.h * this.scale) & ~1);
-    // Brightness sampling must exclude the grey letterbox padding, which
-    // would bias the day/night decision toward "day".
-    this.contentBytes = contentH * variant.size * 3;
-
-    const filter = [
-      view.z > 1 ? `crop=${crop.w}:${crop.h}:${crop.x}:${crop.y}` : null,
-      `scale=${contentW}:${contentH}`,
-      `pad=${variant.size}:${variant.size}:0:0:color=0x727272`,
-    ]
-      .filter(Boolean)
-      .join(',');
     const inputArgs = src.input
       ? ['-re', ...(src.loop ? ['-stream_loop', '-1'] : []), '-i', src.input]
       : ['-f', 'avfoundation', '-framerate', String(src.fps), '-video_size', src.size, '-i', src.device];
@@ -211,7 +223,7 @@ export class CountingEngine {
     // second fixed buffer; if inference is busy, newer frames overwrite it
     // (drop-oldest). Inference chains directly to the next pending frame
     // instead of waiting for another pipe chunk.
-    const frameBytes = variant.size * variant.size * 3;
+    const frameBytes = scaledW * scaledH * 3;
     this.chw = new Float32Array(3 * variant.size * variant.size);
     const assembling = Buffer.alloc(frameBytes);
     const latest = Buffer.alloc(frameBytes);
@@ -321,8 +333,8 @@ export class CountingEngine {
       const config = (await this.#getConfig()) ?? {};
       if (gen !== this.#generation) return;
       this.#applyCountingConfig(config);
-      // View or model changes need a capture restart (crop/input geometry).
-      const snapshot = JSON.stringify({ view: config.view, model: config.model });
+      // View, model or detection-region (zone) changes restart the capture.
+      const snapshot = snapshotOf(config, this.state.frame ?? { w: 2, h: 2 });
       const changed = this.#configSnapshot !== null && snapshot !== this.#configSnapshot;
       this.#configSnapshot = snapshot;
       if (changed && this.state.running) {
@@ -342,13 +354,33 @@ export class CountingEngine {
     this.#refreshConfig();
   }
 
-  async #processFrame(rgb) {
-    const t0 = performance.now();
+  /** Fill this.chw with one letterboxed tile window of the scaled region. */
+  #fillTile(rgb, tileX) {
     const size = this.inputSize;
     const plane = size * size;
     const chw = this.chw;
+    const { scaledW, scaledH } = this.region;
+    chw.fill(114); // letterbox padding
+    const w = Math.min(size, scaledW - tileX);
+    for (let y = 0; y < scaledH; y++) {
+      const rowBase = (y * scaledW + tileX) * 3;
+      const outBase = y * size;
+      for (let x = 0; x < w; x++) {
+        const p = rowBase + x * 3;
+        const o = outBase + x;
+        chw[o] = rgb[p + 2];
+        chw[plane + o] = rgb[p + 1];
+        chw[2 * plane + o] = rgb[p];
+      }
+    }
+  }
+
+  async #processFrame(rgb) {
+    const t0 = performance.now();
+    const size = this.inputSize;
     // Scene brightness → night mode (with hysteresis; re-tunes on flip).
-    const luma = meanLuma(rgb.subarray(0, this.contentBytes || rgb.length), 3);
+    // The region buffer is all content — no letterbox bias.
+    const luma = meanLuma(rgb, 3);
     const wasNight = this.state.night ?? false;
     const night = effectiveNight(
       this.lastConfig?.sceneMode ?? 'auto',
@@ -359,33 +391,40 @@ export class CountingEngine {
       if (this.lastConfig) this.#applyCountingConfig(this.lastConfig);
     }
     this.state.night = night;
-    for (let i = 0; i < plane; i++) {
-      const p = i * 3;
-      chw[i] = rgb[p + 2];
-      chw[plane + i] = rgb[p + 1];
-      chw[2 * plane + i] = rgb[p];
+
+    // One inference per tile; boxes map back through tile offset, region
+    // scale and region origin into full-frame pixels, then a single NMS
+    // pass dedupes the tile-overlap seams.
+    const { x: rx, y: ry, f } = this.region;
+    const raw = [];
+    this.inputName ??= this.#session.inputNames[0];
+    this.outputName ??= this.#session.outputNames[0];
+    for (let i = 0; i < this.tiles.length; i++) {
+      const tile = this.tiles[i];
+      this.#fillTile(rgb, tile.x);
+      const tensor = new ort.Tensor('float32', this.chw, [1, 3, size, size]);
+      const out = (await this.#session.run({ [this.inputName]: tensor }))[this.outputName].data;
+      const hasLeft = i > 0;
+      const hasRight = i < this.tiles.length - 1;
+      for (const d of decode(out, this.grids, 0.1)) {
+        Object.assign(d, clipFlags(d.bbox, hasLeft, hasRight, size));
+        d.bbox[0] += tile.x;
+        raw.push(d);
+      }
     }
-    const tensor = new ort.Tensor('float32', chw, [1, 3, size, size]);
-    const out = (await this.#session.run({ [this.inputName ?? (this.inputName = this.#session.inputNames[0])]: tensor }))[
-      this.outputName ?? (this.outputName = this.#session.outputNames[0])
-    ].data;
+    const reconstructed = mergeSeamFragments(raw);
     this.state.detMs = Math.round(this.state.detMs * 0.9 + (performance.now() - t0) * 0.1);
     this.perfCount = (this.perfCount ?? 0) + 1;
 
     const now = Date.now();
-    const viewArea = this.crop.w * this.crop.h;
-    const detections = nms(decode(out, this.grids, 0.1))
+    const regionArea = this.region.w * this.region.h;
+    const detections = nms(reconstructed)
       .map((d) => ({
-        bbox: [
-          this.crop.x + d.bbox[0] / this.scale,
-          this.crop.y + d.bbox[1] / this.scale,
-          d.bbox[2] / this.scale,
-          d.bbox[3] / this.scale,
-        ],
+        bbox: [rx + d.bbox[0] / f, ry + d.bbox[1] / f, d.bbox[2] / f, d.bbox[3] / f],
         class: YOLOX_CLASSES[d.classId],
         score: Math.min(1, d.score),
       }))
-      .filter((d) => this.classes.has(d.class) && plausibleVehicle(d.bbox, viewArea, this.zoneDims));
+      .filter((d) => this.classes.has(d.class) && plausibleVehicle(d.bbox, regionArea, this.zoneDims));
     const inZone = this.zones.length
       ? detections.filter((d) => this.zones.some((poly) => pointInPolygon(boxCenter(d.bbox), poly)))
       : detections;
@@ -457,6 +496,58 @@ export class CountingEngine {
     this.tracks = [];
     await this.#flush();
   }
+}
+
+/**
+ * Where detection should look, in frame pixels: the zones' bounding band
+ * (with margin — vehicle boxes rise above the road surface the user drew),
+ * else the zoomed view, else the full frame.
+ */
+function computeRegion(config, frame) {
+  const zones = (config.zones ?? []).filter((z) => z.points?.length >= 3);
+  if (zones.length) {
+    let minX = 1;
+    let minY = 1;
+    let maxX = 0;
+    let maxY = 0;
+    for (const z of zones) {
+      for (const p of z.points) {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      }
+    }
+    const mx = 0.04 * (maxX - minX);
+    const my = 0.2 * (maxY - minY);
+    const x = Math.max(0, Math.round((minX - mx) * frame.w));
+    const y = Math.max(0, Math.round((minY - my) * frame.h));
+    const x2 = Math.min(frame.w, Math.round((maxX + mx) * frame.w));
+    const y2 = Math.min(frame.h, Math.round((maxY + my) * frame.h));
+    if (x2 - x >= 32 && y2 - y >= 32) {
+      return { x, y, w: (x2 - x) & ~1, h: (y2 - y) & ~1 };
+    }
+  }
+  const view = { z: 1, cx: 0.5, cy: 0.5, ...config.view };
+  if (view.z > 1) {
+    const cw = Math.round(frame.w / view.z);
+    const ch = Math.round(frame.h / view.z);
+    return {
+      x: Math.round(Math.min(frame.w - cw, Math.max(0, view.cx * frame.w - cw / 2))),
+      y: Math.round(Math.min(frame.h - ch, Math.max(0, view.cy * frame.h - ch / 2))),
+      w: cw & ~1,
+      h: ch & ~1,
+    };
+  }
+  return { x: 0, y: 0, w: frame.w & ~1, h: frame.h & ~1 };
+}
+
+function snapshotOf(config, frame) {
+  return JSON.stringify({
+    view: config.view,
+    model: config.model,
+    region: computeRegion(config, frame),
+  });
 }
 
 function probeFile(file) {

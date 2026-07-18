@@ -90,6 +90,26 @@ test('prune drops state for dead tracks', () => {
   assert.deepEqual(counter.update([track(1, 100, 150)], 100), []);
 });
 
+test('direction gate: a crossing against sustained motion history is an artifact', () => {
+  // History of steady downward motion ending at the given y
+  const withHistory = (id, y, dirDown) => ({
+    ...track(id, 100, y),
+    history: Array.from({ length: 10 }, (_, i) => ({
+      x: 100,
+      y: dirDown ? y - (9 - i) * 12 : y + (9 - i) * 12,
+      t: 1000 + i * 100,
+    })),
+  });
+  const counter = makeCounter();
+  counter.update([withHistory(1, 50, true)], 1900);
+  assert.equal(counter.update([withHistory(1, 150, true)], 2000).length, 1, 'motion agrees: counted');
+
+  const counter2 = makeCounter();
+  // Established downward mover teleports UPWARD across the line (box snap):
+  counter2.update([withHistory(2, 150, true)], 1900);
+  assert.deepEqual(counter2.update([withHistory(2, 40, true)], 2000), [], 'motion opposes: rejected');
+});
+
 test('no line configured means no events', () => {
   const counter = new LineCounter();
   assert.deepEqual(counter.update([track(1, 100, 50)], 0), []);
