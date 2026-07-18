@@ -128,13 +128,39 @@ for night reliability.
 
 ## 2b. Scene mode (day / night)
 
-Settings → Scene (default **auto**: mean frame brightness with hysteresis so
-dusk doesn't flap). At night, vehicles are essentially headlight blobs, so
-the pipeline retunes: the association threshold relaxes (real cars score
-lower), track confirmation demands more evidence (`minHits` 3 → 4 — flickery
-lights must persist before they count), centroid smoothing deepens, track
-memory lengthens, and the crossing dead-band widens. The active mode shows
-in the perf chip (`· night`).
+Settings → Scene (default **auto**). The measured state combines three
+defenses, each earned from a real failure:
+
+1. **Hysteresis** (enter < 45, exit > 70 mean luma) so dusk doesn't flap.
+   Thresholds are calibrated against a real road band: overcast daylight
+   with heavy bridge shadow measures 68–76; real night sits below 40.
+2. **Dwell** (`SceneState`, 10 s): a flipped reading must persist before
+   the mode changes. Plain hysteresis is not enough when luma is sampled
+   over the road band — at night every passing car's headlights spike the
+   mean into "day" for a couple of seconds, and each spike would retune
+   tracking mid-vehicle. Dusk and dawn are gradual, so real transitions
+   always outlast the dwell.
+3. **Boot warmup** (2.5 s): auto-exposure starts dark; judging the scene
+   before it converges latches night mode in daylight.
+
+At night the pipeline retunes (association threshold relaxes, `minHits`
+3 → 4, deeper smoothing, longer track memory, wider crossing dead-band)
+**and the detection feed gets a shadow lift** (`eq=gamma=1.5` in the
+capture chain — the preview keeps showing reality). Night state survives
+engine restarts so the filter doesn't cold-start wrong. The active mode
+shows in the perf chip (`· night`).
+
+## 2c. Focus watchdog
+
+Webcams hunt and stick out of focus in low light. The engine samples the
+detection region's **variance of Laplacian** (`sharpness` in `scene.js`,
+~1 Hz) against a slowly-decaying peak baseline; sustained softness (< 40 %
+of baseline for 6 s) sends a `refocus` command to the capture helper,
+which kicks the camera through a one-shot autofocus scan back to
+continuous AF (rate-limited to one nudge per 30 s; `refocused` in the
+engine status counts them). Textureless scenes (deep night, fog) stay
+below the arm floor so autofocus never hunts on nothing. File inputs skip
+the watchdog entirely.
 
 ## 3. Tracking — `tracker.js`
 
@@ -192,6 +218,13 @@ Per confirmed track, per frame:
    ambiguous motion is given the benefit of the doubt.
 5. **Cooldown** (2 s per track) absorbs oscillation right after a count while
    still allowing a genuine return trip to count as `rev`.
+6. **Duplicate guard** — per-track cooldowns can't stop a *fragment track*
+   (different id) crossing right behind its vehicle, which is exactly what
+   night tuning surfaced in E2E (5 counts on a 4-crossing video). A
+   same-direction crossing of the same line within 800 ms at nearly the
+   same spot is one car; "same spot" is scoped to the vehicle's own box
+   size, so adjacent lanes are never suppressed and a genuine tailgater
+   past the window still counts.
 
 Each crossing emits `{ts, direction, class, confidence, trackId, line}` —
 queued in localStorage and POSTed in batches; the queue survives reloads and

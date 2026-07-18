@@ -175,9 +175,33 @@ do {
     ?? ranges.max { $0.maxFrameRate < $1.maxFrameRate }!
   device.activeVideoMinFrameDuration = range.minFrameDuration
   device.activeVideoMaxFrameDuration = range.maxFrameDuration
+  // Autofocus can arrive locked/stuck from a previous app; make it hunt.
+  if device.isFocusModeSupported(.continuousAutoFocus) {
+    device.focusMode = .continuousAutoFocus
+  }
   device.unlockForConfiguration()
 } catch {
   warn("could not set format: \(error.localizedDescription)")
+}
+
+// Focus commands on stdin ("refocus\n"): the engine sends one when the
+// image stays soft — kicking the mode to a one-shot scan and back forces
+// webcams that hunted and stuck in low light to try again.
+DispatchQueue.global(qos: .utility).async {
+  while let line = readLine(strippingNewline: true) {
+    guard line == "refocus" else { continue }
+    do {
+      try device.lockForConfiguration()
+      if device.isFocusModeSupported(.autoFocus) { device.focusMode = .autoFocus }
+      if device.isFocusModeSupported(.continuousAutoFocus) {
+        device.focusMode = .continuousAutoFocus
+      }
+      device.unlockForConfiguration()
+      warn("refocus triggered")
+    } catch {
+      warn("refocus failed: \(error.localizedDescription)")
+    }
+  }
 }
 
 let d = CMVideoFormatDescriptionGetDimensions(format!.formatDescription)

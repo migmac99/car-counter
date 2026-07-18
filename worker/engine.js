@@ -34,7 +34,7 @@ import { Tracker } from '../public/js/tracker.js';
 import { LineCounter } from '../public/js/counter.js';
 import { SpeedMatcher, gateCalibration, historyKmh } from '../public/js/speed.js';
 import { pointInPolygon, boxCenter, zoneMaxDims, plausibleVehicle } from '../public/js/geometry.js';
-import { nightFromLuma, effectiveNight, trackingTuning, meanLuma } from '../public/js/scene.js';
+import { effectiveNight, trackingTuning, meanLuma, SceneState, sharpness } from '../public/js/scene.js';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PREVIEW_FPS = 15;
@@ -66,6 +66,10 @@ export class CountingEngine {
   // stick there all day (measured: enter at boot, scene settles at luma 76,
   // exit needs > 90).
   #sceneWarmupUntil = 0;
+  #frameNo = 0;
+  #sharpPeak = null;
+  #blurSince = null;
+  #lastRefocus = 0;
 
   constructor({ getConfig, postEvents }) {
     this.#getConfig = getConfig;
@@ -138,11 +142,16 @@ export class CountingEngine {
   async #boot() {
     const gen = ++this.#generation;
     this.#sceneWarmupUntil = Date.now() + 2500;
-    this.state.night = false; // day until measured otherwise (real night re-enters in one frame)
     this.carSamples = []; // px scale may change with the capture size
     this.state.carLenPx = undefined;
     this.state.carLenN = 0;
     const config = (await this.#getConfig()) ?? {};
+
+    // Night survives restarts (the night image filter depends on it); the
+    // dwell in SceneState guards against a stale wrong state instead of a
+    // hard reset.
+    this.state.night = effectiveNight(config.sceneMode ?? 'auto', this.state.night ?? false);
+    this.sceneState = new SceneState(10_000, this.state.night);
 
     const modelName = YOLOX_VARIANTS[config.model] ? config.model : 'yolox-tiny';
     const variant = YOLOX_VARIANTS[modelName];
@@ -183,6 +192,10 @@ export class CountingEngine {
 
     const filter = [
       `crop=${region.w}:${region.h}:${region.x}:${region.y}`,
+      // At night, lift shadows on the DETECTION feed only (the preview
+      // keeps showing reality): dark vehicles gain contrast the detector
+      // can use, at zero cost in daylight since the filter is absent.
+      ...(this.state.night ? ['eq=gamma=1.5:contrast=1.05'] : []),
       `scale=${scaledW}:${scaledH}`,
     ].join(',');
 
@@ -242,8 +255,9 @@ export class CountingEngine {
       this.#capture = spawn(
         CAPTURE_HELPER,
         ['--index', src.device, '--size', src.size, '--fps', String(src.fps)],
-        { stdio: ['ignore', 'pipe', 'pipe'] }
+        { stdio: ['pipe', 'pipe', 'pipe'] } // stdin carries focus commands
       );
+      this.#capture.stdin.on('error', () => {});
       this.#capture.stderr.on('data', (d) => (stderrTail = (stderrTail + d).slice(-400)));
       this.#ffmpeg.stdin.on('error', () => {}); // EPIPE when ffmpeg goes first
       this.#capture.stdout.pipe(this.#ffmpeg.stdin);
@@ -389,21 +403,49 @@ export class CountingEngine {
       const snapshot = snapshotOf(config, this.state.frame ?? { w: 2, h: 2 });
       const changed = this.#configSnapshot !== null && snapshot !== this.#configSnapshot;
       this.#configSnapshot = snapshot;
-      if (changed && this.state.running) {
-        clearTimeout(this.#restartTimer);
-        this.#restartTimer = setTimeout(() => {
-          if (gen === this.#generation && this.state.running) {
-            this.#killProcs();
-            this.#boot().catch((err) => (this.state.error = err.message));
-          }
-        }, 1200);
-      }
+      if (changed && this.state.running) this.#scheduleRestart(gen);
     } catch {}
   }
 
   applyConfig() {
     // Public nudge from the server on PUT /api/config; cheap and debounced.
     this.#refreshConfig();
+  }
+
+  #scheduleRestart(gen = this.#generation) {
+    clearTimeout(this.#restartTimer);
+    this.#restartTimer = setTimeout(() => {
+      if (gen === this.#generation && this.state.running) {
+        this.#killProcs();
+        this.#boot().catch((err) => (this.state.error = err.message));
+      }
+    }, 1200);
+  }
+
+  /** Rolling-peak sharpness baseline; sustained softness triggers refocus. */
+  #checkFocus(sharp) {
+    this.state.sharpness = Math.round(sharp);
+    if (!this.#capture) return; // only cameras can refocus
+    // Decaying peak adapts across day/night scene changes (~2 min half-life
+    // at this sampling rate) without chasing a blurry plateau down. The arm
+    // floor is calibrated to THIS pipeline's scale: the upscaled region of
+    // a distant road measures ~15 in focus, ~5 defocused/flat — textureless
+    // scenes (dark night, fog) stay below it so autofocus never hunts on
+    // nothing.
+    this.#sharpPeak = Math.max(sharp, (this.#sharpPeak ?? sharp) * 0.995);
+    if (this.#sharpPeak < 10 || sharp > 0.4 * this.#sharpPeak) {
+      this.#blurSince = null;
+      return;
+    }
+    this.#blurSince ??= Date.now();
+    if (Date.now() - this.#blurSince < 6000) return;
+    if (Date.now() - (this.#lastRefocus ?? 0) < 30_000) return;
+    this.#lastRefocus = Date.now();
+    this.#blurSince = null;
+    this.state.refocused = (this.state.refocused ?? 0) + 1;
+    try {
+      this.#capture?.stdin.write('refocus\n');
+    } catch {}
   }
 
   /** Fill this.chw with one letterboxed tile window of the scaled region. */
@@ -435,13 +477,23 @@ export class CountingEngine {
     const luma = meanLuma(rgb, 3);
     const wasNight = this.state.night ?? false;
     const measured =
-      Date.now() < this.#sceneWarmupUntil ? wasNight : nightFromLuma(luma, wasNight);
+      Date.now() < this.#sceneWarmupUntil ? wasNight : this.sceneState.update(luma, Date.now());
     const night = effectiveNight(this.lastConfig?.sceneMode ?? 'auto', measured);
     if (night !== wasNight) {
       this.state.night = night;
       if (this.lastConfig) this.#applyCountingConfig(this.lastConfig);
+      // The capture filter chain differs by scene — restart into it. Dwell
+      // makes flips rare (dusk/dawn), so the 1.2 s restart is negligible.
+      this.#scheduleRestart();
     }
     this.state.night = night;
+
+    // Focus watchdog: sustained softness (vs our own rolling peak) tells
+    // the capture helper to re-run autofocus — webcams hunt and stick in
+    // low light. Sampled sparsely; the metric is scene-relative.
+    if ((this.#frameNo = (this.#frameNo ?? 0) + 1) % 30 === 0) {
+      this.#checkFocus(sharpness(rgb, this.region.scaledW, this.region.scaledH));
+    }
 
     // One inference per tile; boxes map back through tile offset, region
     // scale and region origin into full-frame pixels, then a single NMS

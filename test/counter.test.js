@@ -114,3 +114,24 @@ test('no line configured means no events', () => {
   const counter = new LineCounter();
   assert.deepEqual(counter.update([track(1, 100, 50)], 0), []);
 });
+
+test('duplicate guard: a fragment track crossing right behind its car does not double-count', () => {
+  const counter = new LineCounter({ hysteresis: 6, cooldownMs: 2000 });
+  counter.setLine({ a: { x: 100, y: 0 }, b: { x: 100, y: 200 } });
+  const mkTrack = (id, x, y, t) => ({
+    id, cx: x, cy: y, bbox: [x - 30, y - 15, 60, 30], class: 'car', score: 0.8, confirmed: true,
+    history: [{ x: x - 40, y, t: t - 800 }, { x, y, t }],
+  });
+  // Car (track 1) crosses left→right…
+  assert.equal(counter.update([mkTrack(1, 80, 50, 0)], 0).length, 0, 'seed');
+  assert.equal(counter.update([mkTrack(1, 120, 50, 300)], 300).length, 1, 'car counts');
+  // …its fragment (track 2) crosses the same spot 400 ms later: suppressed.
+  counter.update([mkTrack(2, 80, 52, 500)], 500);
+  assert.equal(counter.update([mkTrack(2, 120, 52, 700)], 700).length, 0, 'fragment suppressed');
+  // A car in ANOTHER LANE (far y) inside the window still counts.
+  counter.update([mkTrack(3, 80, 160, 600)], 600);
+  assert.equal(counter.update([mkTrack(3, 120, 160, 800)], 800).length, 1, 'adjacent lane unaffected');
+  // Same spot but past the window: counts (a genuine following car).
+  counter.update([mkTrack(4, 80, 50, 2000)], 2000);
+  assert.equal(counter.update([mkTrack(4, 120, 50, 2300)], 2300).length, 1, 'later follower counts');
+});

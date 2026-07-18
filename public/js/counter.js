@@ -33,11 +33,13 @@ function historyDirection(history, n) {
 export class LineCounter {
   #line = null; // {a: {x,y}, b: {x,y}} in video pixel space
   #state = new Map(); // trackId -> { side, pos, lastCross }
+  #lastByDir = new Map(); // direction -> { ts, pos, radius } (duplicate guard)
 
-  constructor({ hysteresis = 8, cooldownMs = 2000, extentMargin = 0.08 } = {}) {
+  constructor({ hysteresis = 8, cooldownMs = 2000, extentMargin = 0.08, duplicateMs = 800 } = {}) {
     this.hysteresis = hysteresis;
     this.cooldownMs = cooldownMs;
     this.extentMargin = extentMargin;
+    this.duplicateMs = duplicateMs;
   }
 
   get line() {
@@ -94,15 +96,28 @@ export class LineCounter {
         const motion = historyDirection(track.history, n);
         const velocityAgrees =
           motion === null || Math.abs(motion) < 0.005 || Math.sign(motion) === side;
-        if (track.confirmed && withinExtent && cooled && velocityAgrees) {
+        // Duplicate guard: per-track cooldowns can't stop a FRAGMENT track
+        // (different id) crossing right behind its vehicle. A same-direction
+        // crossing within duplicateMs at nearly the same spot is one car —
+        // "same spot" is scoped to the vehicle's own box size, so adjacent
+        // lanes (different y) are never suppressed.
+        const direction = side > 0 ? 'fwd' : 'rev';
+        const last = this.#lastByDir.get(direction);
+        const radius = Math.max(track.bbox?.[2] ?? 0, track.bbox?.[3] ?? 0, 4 * this.hysteresis);
+        const duplicate =
+          last &&
+          now - last.ts < this.duplicateMs &&
+          Math.hypot(pos.x - last.pos.x, pos.y - last.pos.y) < Math.max(radius, last.radius);
+        if (track.confirmed && withinExtent && cooled && velocityAgrees && !duplicate) {
           events.push({
             trackId: track.id,
-            direction: side > 0 ? 'fwd' : 'rev',
+            direction,
             class: track.class,
             confidence: track.score,
             ts: now,
           });
           state.lastCross = now;
+          this.#lastByDir.set(direction, { ts: now, pos, radius });
         }
         state.side = side;
       }

@@ -29,6 +29,66 @@ export function effectiveNight(sceneMode, measuredNight) {
   return measuredNight; // 'auto'
 }
 
+/**
+ * Night/day decision with hysteresis AND dwell: a flipped luma reading must
+ * persist for `dwellMs` before the mode actually changes. Plain hysteresis
+ * is not enough when luma is sampled over the road band — at night every
+ * passing car's headlights spike the mean above the day threshold for a
+ * couple of seconds, and each spike would retune tracking mid-vehicle.
+ * Dusk and dawn are gradual, so a real transition always outlasts the
+ * dwell.
+ */
+export class SceneState {
+  constructor(dwellMs = 10_000, night = false) {
+    this.dwellMs = dwellMs;
+    this.night = night;
+    this.candidate = null;
+    this.since = 0;
+  }
+
+  update(luma, now) {
+    const measured = nightFromLuma(luma, this.night);
+    if (measured === this.night) {
+      this.candidate = null;
+      return this.night;
+    }
+    if (this.candidate !== measured) {
+      this.candidate = measured;
+      this.since = now;
+    }
+    if (now - this.since >= this.dwellMs) {
+      this.night = measured;
+      this.candidate = null;
+    }
+    return this.night;
+  }
+}
+
+/**
+ * Focus metric: variance of the Laplacian over the green channel (sparse
+ * grid). Defocus crushes local second derivatives, so a sharp scene scores
+ * an order of magnitude above a blurred one; the absolute value is
+ * scene-dependent, so consumers compare against their own rolling baseline.
+ */
+export function sharpness(data, w, h, channels = 3) {
+  let sum = 0;
+  let sum2 = 0;
+  let n = 0;
+  const row = w * channels;
+  for (let y = 1; y < h - 1; y += 2) {
+    for (let x = 1; x < w - 1; x += 2) {
+      const i = (y * w + x) * channels + 1;
+      const l = 4 * data[i] - data[i - channels] - data[i + channels] - data[i - row] - data[i + row];
+      sum += l;
+      sum2 += l * l;
+      n += 1;
+    }
+  }
+  if (n === 0) return 0;
+  const mean = sum / n;
+  return sum2 / n - mean * mean;
+}
+
 export function trackingTuning(night) {
   return night
     ? { minHits: 4, smoothing: 0.45, maxAgeMs: 2200, hysteresisScale: 1.5, threshScale: 0.85 }
