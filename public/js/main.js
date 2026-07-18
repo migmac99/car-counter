@@ -44,6 +44,7 @@ const refs = {
   flipBtn: $('flip-btn'),
   drawRoiBtn: $('draw-roi-btn'),
   autoRoadBtn: $('auto-road-btn'),
+  dimBtn: $('dim-btn'),
   deleteShapeBtn: $('delete-shape-btn'),
   engineSize: $('engine-size'),
   gateA: $('gate-a'),
@@ -102,6 +103,7 @@ const state = {
   speed: { gateA: '', gateB: '', meters: 0, limitKmh: 0 },
   model: 'yolox-tiny',
   sceneMode: 'auto', // 'auto' | 'day' | 'night'
+  dimOutside: false, // darken the image outside zones (focus mode)
 };
 let measuredNight = false;
 
@@ -251,6 +253,7 @@ function currentConfig() {
     speed: { ...state.speed },
     model: state.model,
     sceneMode: state.sceneMode,
+    dimOutside: state.dimOutside,
   };
 }
 
@@ -285,6 +288,8 @@ function applyConfig(config) {
   state.speed = { gateA: '', gateB: '', meters: 0, limitKmh: 0, ...config.speed };
   state.model = MODELS[config.model] ? config.model : 'yolox-tiny';
   state.sceneMode = ['auto', 'day', 'night'].includes(config.sceneMode) ? config.sceneMode : 'auto';
+  state.dimOutside = Boolean(config.dimOutside);
+  refs.dimBtn.classList.toggle('active', state.dimOutside);
   applySpeedConfig();
   refs.minScore.value = state.minScore;
   refs.modelSelect.value = state.model;
@@ -667,17 +672,25 @@ setInterval(updatePerfChip, 2000);
 // glued to the cars at full display frame rate. The render-time offset
 // adapts to the camera's real frame interval — at a night-time 5 fps the
 // preview lags far more than at 30 fps.
+// ffmpeg's capture→JPEG-write latency (encode plus the preview-rate frame
+// bucketing). The only remaining estimate — everything else is measured.
+const PREVIEW_CAPTURE_LAG_MS = 70;
+
 function engineTracksNow() {
   const tracks = engineStatus.tracks ?? [];
   const ts = engineStatus.tracksTs;
   if (!ts) return tracks;
-  const frameInterval = engineStatus.camFps > 0 ? 1000 / engineStatus.camFps : 33;
-  // Boxes must sit on the PREVIEW's frame, which trails live by roughly one
-  // preview interval plus encode/transport. Track data itself is near-live
-  // over the WebSocket, so this offset is the preview's latency, not the
-  // data's.
-  const lag = Math.min(400, 100 + frameInterval / 2);
-  const dt = Math.max(-800, Math.min(900, Date.now() - ts - lag));
+  let dt;
+  if (previewWsAt && Date.now() - previewWsAt < 1500) {
+    // Timestamped preview: render tracks at the server-clock moment of the
+    // frame on screen. No client clock, no latency guessing.
+    dt = previewWsTs - PREVIEW_CAPTURE_LAG_MS - ts;
+  } else {
+    // MJPEG fallback: estimate how far the shown frame trails live.
+    const frameInterval = engineStatus.camFps > 0 ? 1000 / engineStatus.camFps : 33;
+    dt = Date.now() - ts - Math.min(400, 100 + frameInterval / 2);
+  }
+  dt = Math.max(-800, Math.min(900, dt));
   return tracks.map((t) => ({
     ...t,
     bbox: [t.bbox[0] + (t.vx ?? 0) * dt, t.bbox[1] + (t.vy ?? 0) * dt, t.bbox[2], t.bbox[3]],
@@ -692,6 +705,7 @@ function frame() {
     lines: editor.shapes.lines,
     zones: editor.shapes.zones,
     selection: editor.selection,
+    dimOutside: state.dimOutside,
     view: viewRect(),
     editing: editor.mode
       ? { mode: editor.mode, points: editor.points, cursor: editor.cursor }
@@ -815,16 +829,19 @@ function applyEngineUi() {
     }
     refs.videoHint.hidden = true;
     setStatus(state.lines.length ? 'counting (server)' : 'server engine on — add a counting line', true);
-    // Push stream (MJPEG) — much lower latency than polling. If the stream
-    // errors (proxy stripping it, etc.), fall back to polling snapshots.
-    refs.preview.onerror = () => {
-      refs.preview.onerror = null;
-      clearInterval(previewTimer);
-      previewTimer = setInterval(() => {
-        refs.preview.src = `/api/preview?t=${Date.now()}`;
-      }, 250);
-    };
-    refs.preview.src = '/api/preview.mjpeg';
+    // Preview transport, best first: timestamped frames over the WebSocket
+    // (drive the overlay in exact sync), else the MJPEG push stream, else
+    // polling snapshots if even that errors.
+    if (Date.now() - previewWsAt > 1500) {
+      refs.preview.onerror = () => {
+        refs.preview.onerror = null;
+        clearInterval(previewTimer);
+        previewTimer = setInterval(() => {
+          refs.preview.src = `/api/preview?t=${Date.now()}`;
+        }, 250);
+      };
+      refs.preview.src = '/api/preview.mjpeg';
+    }
     editor.setShapes(shapesToPixels());
     applyView(); // preview arrives pre-zoomed; drop the CSS transform
   } else {
@@ -883,10 +900,37 @@ async function pollEngine() {
 // Realtime channel: per-frame track snapshots plus status pushes. The UI
 // renders these the moment the server produces them — polling only backs
 // this up, it no longer paces the overlay.
+//
+// Preview frames arrive on the same socket as binary [float64 server-ts]
+// [jpeg]. Because the shown frame's timestamp and tracksTs share the
+// server clock, the overlay can dead-reckon tracks to the EXACT moment of
+// the displayed image — boxes neither trail nor lead the cars, regardless
+// of encode/transport latency.
+let previewWsTs = 0; // server time of the frame on screen
+let previewWsAt = 0; // client time it arrived (freshness only)
+let previewBlobUrl = null;
+
+function handlePreviewFrame(buf) {
+  engineWsFresh = Date.now();
+  if (!engineRunning()) return;
+  previewWsTs = new DataView(buf).getFloat64(0);
+  previewWsAt = Date.now();
+  const url = URL.createObjectURL(new Blob([buf.slice(8)], { type: 'image/jpeg' }));
+  const prev = previewBlobUrl;
+  previewBlobUrl = url;
+  refs.preview.src = url;
+  if (prev) setTimeout(() => URL.revokeObjectURL(prev), 1000);
+}
+
 function connectEngineWs() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(`${proto}//${location.host}/api/ws`);
+  ws.binaryType = 'arraybuffer';
   ws.onmessage = (e) => {
+    if (e.data instanceof ArrayBuffer) {
+      handlePreviewFrame(e.data);
+      return;
+    }
     let m;
     try {
       m = JSON.parse(e.data);
@@ -909,6 +953,8 @@ function connectEngineWs() {
   };
   ws.onclose = () => {
     engineWsFresh = 0;
+    previewWsAt = 0;
+    if (engineRunning()) applyEngineUi(); // fall back to the MJPEG stream
     setTimeout(connectEngineWs, 3000);
   };
   ws.onerror = () => ws.close();
@@ -958,6 +1004,11 @@ refs.drawRoiBtn.addEventListener('click', () => {
 });
 refs.deleteShapeBtn.addEventListener('click', () => editor.deleteSelection());
 refs.flipBtn.addEventListener('click', () => editor.flipTargetLine());
+refs.dimBtn.addEventListener('click', () => {
+  state.dimOutside = !state.dimOutside;
+  refs.dimBtn.classList.toggle('active', state.dimOutside);
+  persistConfig();
+});
 
 // --- settings ---
 refs.minScore.addEventListener('input', () => {

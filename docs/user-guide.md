@@ -34,6 +34,10 @@ online, but the PWA then needs connectivity on first use.
 3. Optional — **Add zone**: click vertices around an area to watch
    (double-click or Enter to close, Escape to cancel). Detections outside
    all zones are ignored — useful to exclude parked cars or a second road.
+   The server also crops its capture to the zones, so drawing a tight road
+   band directly raises detection resolution. Toggle **Dim outside** to
+   darken everything beyond the zones — a literal picture of what is being
+   tracked.
 4. Watch the overlay: white boxes are tracked vehicles with IDs, blue trails
    show their paths, and a pulse marks each count.
 

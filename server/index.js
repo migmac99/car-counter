@@ -142,13 +142,35 @@ export function startServer({
   if (app.engine) {
     app.engine.onPush = (msg) => server.publish('engine', JSON.stringify(msg));
   }
-  return { server, store: app.store, engine: app.engine };
+  // Preview frames ride the same topic as binary [float64 write-ts][jpeg]
+  // (clients tell them from JSON by type), so the UI knows the SERVER time
+  // of the exact frame it displays and can render tracks at that moment —
+  // no guessed latency constants, and both timestamps share the server
+  // clock (correct for remote browsers too). One topic keeps `bun --hot`
+  // safe: reloads must never strand sockets subscribed to a topic the new
+  // publisher no longer uses.
+  // Gate on the engine running, NOT subscriberCount: under `bun --hot` the
+  // reused server can report 0 for sockets subscribed before the reload
+  // while publish still reaches them. The idle cost is one stat() per tick.
+  let lastPreviewSeq = -1;
+  const previewTimer = setInterval(async () => {
+    if (!app.engine?.status.running) return;
+    const p = await app.engine.previewFrame(lastPreviewSeq).catch(() => null);
+    if (!p) return;
+    lastPreviewSeq = p.seq;
+    const buf = new Uint8Array(8 + p.jpeg.length);
+    new DataView(buf.buffer).setFloat64(0, p.seq);
+    buf.set(p.jpeg, 8);
+    server.publish('engine', buf);
+  }, 50);
+  return { server, store: app.store, engine: app.engine, previewTimer };
 }
 
 if (import.meta.main) {
   // Under `bun --hot` this module re-evaluates on every save; Bun.serve reuses
   // the listening socket and swaps the fetch handler in place. Close the
   // previous run's DB connection and register signal handlers only once.
+  clearInterval(globalThis.__carCounter?.previewTimer);
   await globalThis.__carCounter?.engine?.dispose();
   globalThis.__carCounter?.store.close();
   globalThis.__carCounter = startServer();

@@ -135,7 +135,7 @@ Names: 1–40 characters — letters, digits, spaces, `-`, `_`.
 | `GET /api/engine/devices` | Cameras as the server sees them: `{devices: [{index, name}]}` |
 | `GET /api/preview` | Latest preview JPEG from the engine (no-store; 404 when not running) |
 | `GET /api/preview.mjpeg` | Multipart MJPEG push stream of the preview (what the UI displays) |
-| `GET /api/ws` | WebSocket. Server → client only: `{type: "tracks", tracks, tracksTs, counted, night}` per processed frame (~camera rate); `{type: "status", status}` every 250 ms. The UI's realtime overlay feed — polling is only its fallback |
+| `GET /api/ws` | WebSocket. Server → client only. JSON: `{type: "tracks", tracks, tracksTs, counted, night}` per processed frame (~camera rate); `{type: "status", status}` every 250 ms. Binary: `[float64 server-ts][jpeg]` preview frames (~15/s) — the UI shows these and renders tracks at the shown frame's server timestamp, so overlay and image are in exact sync. Polling and MJPEG are only fallbacks |
 
 ## `DELETE /api/events?confirm=yes`
 

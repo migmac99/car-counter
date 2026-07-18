@@ -63,6 +63,24 @@ export class Overlay {
     const scale = (devicePixelRatio || 1) / k;
 
     const isSelected = (kind, id) => s.selection?.kind === kind && s.selection?.id === id;
+    // Focus mode: darken everything outside the zones — a literal picture
+    // of "only what's inside the zones is tracked". Even-odd fill of the
+    // screen rect (device space) minus the zone polygons (video space).
+    if (s.dimOutside && (s.zones ?? []).some((z) => z.points.length >= 3)) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.rect(0, 0, canvas.width, canvas.height);
+      ctx.setTransform(k, 0, 0, k, ox - view.visX * k, oy - view.visY * k);
+      for (const zone of s.zones) {
+        if (zone.points.length < 3) continue;
+        zone.points.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+        ctx.closePath();
+      }
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+      ctx.fill('evenodd');
+      ctx.restore();
+    }
     for (const zone of s.zones ?? []) this.#drawZone(zone, isSelected('zone', zone.id), scale);
     if (s.editing?.mode === 'zone') this.#drawPending(s.editing, ROI_COLOR, scale, true);
     (s.lines ?? []).forEach((line, i) =>

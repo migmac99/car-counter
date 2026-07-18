@@ -161,10 +161,20 @@ Without swiftc the engine falls back to the plain ffmpeg path.
 
 **Realtime channel.** `GET /api/ws` upgrades to a WebSocket on which the
 server pushes a track snapshot **per processed frame** (~24-30/s) plus
-status every 250 ms; the UI renders them with velocity dead-reckoning at
-display refresh, so overlay boxes sit on the cars instead of trailing them.
-HTTP polling remains as a 2 s safety net (and the sole path if the socket
-drops — it reconnects itself).
+status every 250 ms — and the preview frames themselves as binary
+`[float64 server-ts][jpeg]` messages. Because the displayed frame's
+timestamp and `tracksTs` share the server clock, the overlay dead-reckons
+every track to the exact moment of the image on screen: boxes neither
+trail nor lead the cars, with no guessed latency constants and no
+dependence on the client's clock (remote browsers stay correct). HTTP
+polling and the MJPEG stream remain as fallbacks when the socket is down
+(it reconnects itself).
+
+Caveat learned the hard way: under `bun --hot`, publishers and websocket
+handlers from *before* a reload can keep serving while new module code
+never runs (the process can even wedge mid-reload). Symptoms look like
+"my change does nothing" while the server responds normally — verify with
+an observable marker and restart `bun dev` when in doubt.
 
 - `GET /api/engine` — status: running, model, execution provider, det/s,
   latency, counted, live track snapshot for the overlay.
