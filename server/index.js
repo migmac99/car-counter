@@ -118,7 +118,9 @@ export function createApp({ dbFile = join(ROOT, 'data', 'car-counter.sqlite') } 
 }
 
 export function startServer({
-  port = Number(process.env.PORT ?? 3000),
+  // 2277 = "CARS" on a phone keypad — and safely away from the :3000 that
+  // every dev tool on earth wants.
+  port = Number(process.env.PORT ?? 2277),
   hostname = process.env.HOST ?? '0.0.0.0',
   dbFile = process.env.DB_FILE,
 } = {}) {

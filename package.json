@@ -14,8 +14,9 @@
   ],
   "scripts": {
     "postinstall": "bun scripts/fetch-vendor.mjs",
-    "dev": "bun --hot server/index.js",
+    "dev": "bun scripts/killme.mjs --quiet && bun --hot server/index.js",
     "start": "bun server/index.js",
+    "killme": "bun scripts/killme.mjs",
     "worker": "bun worker/index.js",
     "setup": "bun scripts/fetch-vendor.mjs",
     "icons": "bun scripts/generate-icons.mjs",

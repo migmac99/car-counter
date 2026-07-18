@@ -60,7 +60,7 @@ bun test     # run the unit + integration test suite
 server-side counting. `bun run setup --model s` fetches the most accurate
 YOLOX-s model.) Killing the server stops everything, capture included.
 
-Open <http://localhost:3000>, click **Start server counting**, then
+Open <http://localhost:2277>, click **Start server counting**, then
 **Add line** and click two points across the road (you're drawing on the
 server's own preview). The arrow shows which crossing direction counts as
 *forward*. Close the browser — counting continues; the page is just a

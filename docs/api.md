@@ -1,6 +1,6 @@
 # REST API reference
 
-Base URL: the server origin (default `http://localhost:3000`). All bodies are
+Base URL: the server origin (default `http://localhost:2277`). All bodies are
 JSON. Errors return `{"error": "<message>"}` with an appropriate 4xx/5xx
 status. There is no authentication — see the security note in
 [architecture.md](architecture.md#security).

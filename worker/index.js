@@ -6,7 +6,7 @@
  * engine itself (see docs/architecture.md).
  *
  * Usage:
- *   bun worker/index.js                     # default camera 0, server :3000
+ *   bun worker/index.js                     # default camera 0, server :2277
  *   bun worker/index.js --device 1          # pick a camera (see --list-devices)
  *   bun worker/index.js --input clip.webm   # process a recorded file (realtime)
  *   bun worker/index.js --list-devices
@@ -33,7 +33,7 @@ if (problem) {
   process.exit(1);
 }
 
-const SERVER = opt('server', 'http://localhost:3000');
+const SERVER = opt('server', 'http://localhost:2277');
 
 const engine = new CountingEngine({
   async getConfig() {

@@ -13,7 +13,7 @@
 
 ```sh
 bun run setup   # one-time, optional but recommended: self-host the ML model (~16 MB)
-bun start       # http://localhost:3000   (PORT=8080 bun start to change)
+bun start       # http://localhost:2277   (PORT=8080 bun start to change)
 ```
 
 Without `bun run setup` the browser loads the model from CDN instead — fine
@@ -202,7 +202,7 @@ model), the system makes zero external network requests — verified by
 auditing a complete browser session. The whole stack runs air-gapped.
 
 `worker/index.js` remains as a standalone CLI for running the capture on a
-**different machine** than the server (`--server http://host:3000`), or for
+**different machine** than the server (`--server http://host:2277`), or for
 batch-processing recorded footage (`--input clip.mp4`).
 
 ### In the browser (fallback mode)
@@ -231,11 +231,11 @@ page** — the server only stores results:
 ## Using a phone or another device as the camera
 
 Browsers only allow camera access on `localhost` or **HTTPS**. From another
-device, `http://<your-ip>:3000` will load but the camera button will fail.
+device, `http://<your-ip>:2277` will load but the camera button will fail.
 Options:
 
 - **Port forward over SSH** from the viewing device:
-  `ssh -L 3000:localhost:3000 user@server` → open `http://localhost:3000`.
+  `ssh -L 2277:localhost:2277 user@server` → open `http://localhost:2277`.
 - **Reverse proxy with TLS** (Caddy makes this a two-liner) in front of the
   server, which also lets you add authentication.
 
