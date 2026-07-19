@@ -148,6 +148,12 @@ export function planTiles(regionW, inputSize, overlap = Math.round(inputSize * 0
 export function regionScale(regionW, regionH, inputSize, maxTiles = 4) {
   const overlap = Math.round(inputSize * 0.25);
   const maxWidth = maxTiles * (inputSize - overlap) + overlap;
+  // Upscale cap 1.6×: beyond native resolution adds no information. Tested
+  // pushing to 2.0–2.4× on a distant, soft road band — it did NOT help
+  // yolox-tiny recall (these near-noise-floor detections don't improve with
+  // interpolated pixels) and it added tiles/latency, cutting the frame rate
+  // that tracking relies on. Keep the frame rate; bridge sporadic
+  // detections in the tracker instead.
   return Math.min(1.6, inputSize / regionH, maxWidth / regionW);
 }
 

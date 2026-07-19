@@ -114,9 +114,12 @@ video yielded no detections while a side-view car was detected at 0.9+.)
 
 ## 2. Zone filter & plausibility gate
 
-If a detection zone (polygon) is drawn, detections whose **box center** falls
-outside it are discarded before tracking. Use it to exclude a parking lane,
-sidewalk, or the far carriageway.
+If a detection zone (polygon) is drawn, detections whose box **overlaps** it
+are kept for tracking; those entirely outside are discarded. (This was a
+strict *center-in-polygon* test, which silently dropped cars whose center
+fell just outside a thin zone band while their body straddled it —
+`boxOverlapsPolygon` fixed a real recall loss.) Use the zone to exclude a
+parking lane, sidewalk, or the far carriageway.
 
 Zones also feed a **size-sanity gate**: no real vehicle is taller or wider
 than the road region you drew, so detections exceeding the zone's bounding
@@ -161,6 +164,39 @@ continuous AF (rate-limited to one nudge per 30 s; `refocused` in the
 engine status counts them). Textureless scenes (deep night, fog) stay
 below the arm floor so autofocus never hunts on nothing. File inputs skip
 the watchdog entirely.
+
+### Recall on distant / low-contrast roads
+
+Small, soft, low-contrast vehicles (a far road seen through glass, or under
+flat/back-lit conditions) sit near YOLOX's detection floor: per-frame recall
+becomes sporadic (a real car is caught in perhaps 40 % of frames) and it
+**varies with the light** — the same road detects far better at a high-sun,
+high-contrast hour than under haze or glare. Findings from tuning against a
+real distant highway feed:
+
+- **Model:** yolox-**tiny** matched or beat yolox-s on these tiny boxes *and*
+  runs at twice the frame rate. More frames beat a heavier per-frame model,
+  because tracking depends on frame rate. yolox-s is the right pick only when
+  vehicles are reasonably large.
+- **Upscale:** pushing the region past ~1.6× does **not** help — interpolated
+  pixels add no information the detector can use, and the extra tiles cut the
+  frame rate. (Large, close vehicles are a different story; the cap still
+  applies.)
+- **Contrast/gamma enhancement HURTS in daylight.** A washed-out frame has
+  low signal-to-noise; boosting contrast amplifies the noise too and
+  *collapsed* detection in testing (6 → 0). The detection feed is left
+  untouched by day. (Night is a separate regime — see §2c.)
+- **Bridge the gaps, don't fake the pixels.** Since detection is sporadic but
+  the *tracker* holds identity, a confirmed track is displayed for up to
+  450 ms after its last real detection with its box motion-predicted forward
+  (§3), so a car reads as one steady box instead of flickering in and out.
+  This changes what you see, never the counts (counting runs on raw tracks).
+
+The single biggest lever remains **image quality at the source**: a sharper,
+higher-contrast view (better light, cleaner glass, a longer physical lens)
+helps more than any software knob. The perf chip's live detection rate and
+the engine's `detCount` show how many vehicles are actually being found each
+frame.
 
 ## 3. Tracking — `tracker.js`
 

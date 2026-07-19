@@ -148,7 +148,7 @@ test('mergeSeamFragments chains across multiple seams and respects lanes', () =>
 });
 
 test('regionScale balances upscale cap, height fit and tile budget', () => {
-  // Small zoomed crop: upscale but no more than 1.6x
+  // Small zoomed crop: upscale but no more than the 1.6x cap
   assert.equal(regionScale(256, 144, 416), 1.6);
   // Wide road band: bounded by the 4-tile width budget
   const f = regionScale(1800, 220, 416);

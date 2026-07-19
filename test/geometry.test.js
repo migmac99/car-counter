@@ -1,14 +1,6 @@
 import { test } from 'bun:test';
 import assert from 'node:assert/strict';
-import {
-  sideOfLine,
-  signedDistance,
-  positiveNormal,
-  intersectionParams,
-  pointInPolygon,
-  iou,
-  boxCenter,
-} from '../public/js/geometry.js';
+import { sideOfLine, signedDistance, positiveNormal, intersectionParams, pointInPolygon, iou, boxCenter, boxOverlapsPolygon } from '../public/js/geometry.js';
 
 const A = { x: 0, y: 100 };
 const B = { x: 200, y: 100 }; // horizontal line, positive side = below (y > 100)
@@ -68,4 +60,16 @@ test('iou', () => {
 
 test('boxCenter', () => {
   assert.deepEqual(boxCenter([10, 20, 30, 40]), { x: 25, y: 40 });
+});
+
+test('boxOverlapsPolygon keeps edge boxes a center test would drop', () => {
+  // Thin horizontal zone band y 100-140
+  const band = [ {x:0,y:100},{x:400,y:100},{x:400,y:140},{x:0,y:140} ];
+  // Car whose CENTER (y=95) is just above the band but body straddles it.
+  assert.equal(boxOverlapsPolygon([180, 70, 60, 50], band), true, 'straddling box overlaps');
+  assert.equal(pointInPolygon({x:210,y:95}, band), false, 'its center is outside the band');
+  // Car fully below the band: no overlap.
+  assert.equal(boxOverlapsPolygon([180, 200, 60, 40], band), false, 'box below band excluded');
+  // Box wider than the band, band vertices fall inside it.
+  assert.equal(boxOverlapsPolygon([150, 90, 100, 60], band), true, 'box containing band overlaps');
 });

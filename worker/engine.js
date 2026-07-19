@@ -33,7 +33,7 @@ import {
 import { Tracker } from '../public/js/tracker.js';
 import { LineCounter } from '../public/js/counter.js';
 import { SpeedMatcher, gateCalibration, historyKmh } from '../public/js/speed.js';
-import { pointInPolygon, boxCenter, zoneMaxDims, plausibleVehicle } from '../public/js/geometry.js';
+import { boxOverlapsPolygon, zoneMaxDims, plausibleVehicle } from '../public/js/geometry.js';
 import { effectiveNight, trackingTuning, meanLuma, SceneState, sharpness } from '../public/js/scene.js';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -521,16 +521,20 @@ export class CountingEngine {
 
     const now = Date.now();
     const regionArea = this.region.w * this.region.h;
-    const detections = nms(reconstructed)
-      .map((d) => ({
-        bbox: [rx + d.bbox[0] / f, ry + d.bbox[1] / f, d.bbox[2] / f, d.bbox[3] / f],
-        class: YOLOX_CLASSES[d.classId],
-        score: Math.min(1, d.score),
-      }))
-      .filter((d) => this.classes.has(d.class) && plausibleVehicle(d.bbox, regionArea, this.zoneDims));
+    const mapped = nms(reconstructed).map((d) => ({
+      bbox: [rx + d.bbox[0] / f, ry + d.bbox[1] / f, d.bbox[2] / f, d.bbox[3] / f],
+      class: YOLOX_CLASSES[d.classId],
+      score: Math.min(1, d.score),
+    }));
+    const detections = mapped.filter(
+      (d) => this.classes.has(d.class) && plausibleVehicle(d.bbox, regionArea, this.zoneDims)
+    );
     const inZone = this.zones.length
-      ? detections.filter((d) => this.zones.some((poly) => pointInPolygon(boxCenter(d.bbox), poly)))
+      ? detections.filter((d) => this.zones.some((poly) => boxOverlapsPolygon(d.bbox, poly)))
       : detections;
+    // Per-frame detection recall, surfaced in status for field debugging:
+    // how many vehicles the model found this frame (post-NMS, in-zone).
+    this.state.detCount = inZone.length;
     const tracks = this.tracker.update(inZone, now);
     // Continuous velocity for every confirmed track: median step speed over
     // the recent path — robust to the centroid teleports that box flapping
@@ -586,22 +590,39 @@ export class CountingEngine {
     this.speedMatcher.prune(liveIds);
     // Publish a lightweight track snapshot for the UI overlay. Velocities
     // (px/ms) let the client dead-reckon smooth motion between polls.
-    // Tracks in their miss grace-period stay alive for re-association but
-    // are NOT displayed — they would render as ghost boxes trailing cars.
+    //
+    // Detection on a distant/soft road is SPORADIC — a real car is caught
+    // in maybe 40 % of frames. Hiding a confirmed track the instant a frame
+    // misses it makes boxes flicker and vanish, which reads as "not
+    // detecting cars" even though the track is alive and being re-acquired.
+    // Instead, a confirmed track is displayed for up to DISPLAY_HOLD_MS
+    // after its last real detection, with its box MOTION-PREDICTED forward
+    // (constant velocity) so it rides along the car through the gap rather
+    // than freezing at the stale position. maxAge still bounds ghosts when a
+    // car actually leaves.
+    const DISPLAY_HOLD_MS = 450;
     this.state.tracksTs = now;
-    this.tracks = tracks.filter((t) => t.misses <= 2).map((t) => ({
-      id: t.id,
-      bbox: t.display ?? t.bbox, // smoothed for the overlay; logic uses raw
-
-      class: t.class,
-      confirmed: t.confirmed,
-      kmh: t.kmh,
-      over: t.over,
-      estKmh: t.estKmh == null ? undefined : Math.round(t.estKmh),
-      vx: t.vx,
-      vy: t.vy,
-      history: t.history.slice(-15).map((p) => ({ x: p.x, y: p.y })),
-    }));
+    this.tracks = tracks
+      .filter((t) => t.confirmed && now - t.lastSeen <= DISPLAY_HOLD_MS)
+      .map((t) => {
+        const base = t.display ?? t.bbox; // smoothed for the overlay; logic uses raw
+        const dt = now - t.lastSeen; // ms coasted since the last real detection
+        const bbox =
+          dt > 0 ? [base[0] + (t.vx ?? 0) * dt, base[1] + (t.vy ?? 0) * dt, base[2], base[3]] : base;
+        return {
+          id: t.id,
+          bbox,
+          class: t.class,
+          confirmed: t.confirmed,
+          coasting: dt > 90, // client can style held boxes if it wants
+          kmh: t.kmh,
+          over: t.over,
+          estKmh: t.estKmh == null ? undefined : Math.round(t.estKmh),
+          vx: t.vx,
+          vy: t.vy,
+          history: t.history.slice(-15).map((p) => ({ x: p.x, y: p.y })),
+        };
+      });
     // Realtime hook: the host pushes this to WebSocket clients per frame,
     // so the UI overlay runs at capture rate instead of poll rate.
     this.onTracks?.({

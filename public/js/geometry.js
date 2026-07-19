@@ -60,6 +60,28 @@ export function pointInPolygon(p, poly) {
   return inside;
 }
 
+/**
+ * Does an [x,y,w,h] box overlap a polygon at all? True if the box center or
+ * any corner is inside the polygon, or any polygon vertex is inside the box.
+ * Looser than a center-point test: a vehicle whose center falls just outside
+ * a thin zone band but whose body straddles it still counts as in-zone —
+ * the strict center test was silently dropping edge detections.
+ */
+export function boxOverlapsPolygon(bbox, poly) {
+  if (!poly || poly.length < 3) return false;
+  const [x, y, w, h] = bbox;
+  const pts = [
+    { x: x + w / 2, y: y + h / 2 },
+    { x, y },
+    { x: x + w, y },
+    { x, y: y + h },
+    { x: x + w, y: y + h },
+  ];
+  for (const p of pts) if (pointInPolygon(p, poly)) return true;
+  for (const v of poly) if (v.x >= x && v.x <= x + w && v.y >= y && v.y <= y + h) return true;
+  return false;
+}
+
 /** Intersection-over-union of two [x, y, w, h] boxes. */
 export function iou(boxA, boxB) {
   const [ax, ay, aw, ah] = boxA;
