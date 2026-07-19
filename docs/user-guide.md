@@ -157,7 +157,8 @@ automatically** on the next visit.
 - **cars/min · last 60 s** — crossings in the last rolling minute.
 - **avg cars/min · last 5 min** — smoother short-term rate.
 - **last hour / today / all time** — running totals (server-local midnight).
-- **forward / reverse** — today's split by direction.
+- **forward / reverse** — today's split by direction, with the ratio of
+  reverse crossings per forward crossing beside it.
 - **Sparkline** — per-minute counts over the last 30 minutes.
 - **History** — minute, hour or day buckets over a selectable range, as a
   stacked bar chart (blue = forward, green = reverse) with hover details and

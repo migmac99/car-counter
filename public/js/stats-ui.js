@@ -142,6 +142,8 @@ export class StatsUi {
     refs.tileTotal.textContent = this.#counts(s.allTime);
     refs.dirFwd.textContent = s.today.fwd;
     refs.dirRev.textContent = s.today.rev;
+    // "How many go backwards for every one that goes forward" — today.
+    refs.dirRatio.textContent = s.today.fwd > 0 ? (s.today.rev / s.today.fwd).toFixed(2) : '–';
 
     const speedActive = this.speedInfo().active;
     refs.tileSpeedWrap.hidden = !speedActive;

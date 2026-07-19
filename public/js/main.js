@@ -94,6 +94,7 @@ const refs = {
   speedChart: $('speed-chart'),
   dirFwd: $('dir-fwd'),
   dirRev: $('dir-rev'),
+  dirRatio: $('dir-ratio'),
   sparkline: $('sparkline'),
   bucketSeg: $('bucket-seg'),
   rangeSelect: $('range-select'),
