@@ -126,6 +126,7 @@ export class CountingEngine {
     this.sourceOpts = {
       input: source.input ?? null,
       device: String(source.device ?? '0'),
+      deviceName: source.deviceName || null,
       size: source.size ?? '1920x1080',
       fps: Number(source.fps ?? 30),
       loop: Boolean(source.loop),
@@ -175,7 +176,8 @@ export class CountingEngine {
           return { w, h };
         })();
     this.state.frame = frame;
-    this.state.source = src.input ?? `camera ${src.device} (${src.size}@${src.fps})`;
+    this.state.source =
+      src.input ?? `${src.deviceName || `camera ${src.device}`} (${src.size}@${src.fps})`;
     this.#applyCountingConfig(config); // needs frame dims for pixel-space shapes
 
     // Detection REGION: the zones' bounding band when zones exist (the model
@@ -254,7 +256,15 @@ export class CountingEngine {
     if (useHelper) {
       this.#capture = spawn(
         CAPTURE_HELPER,
-        ['--index', src.device, '--size', src.size, '--fps', String(src.fps)],
+        [
+          '--index', src.device,
+          // Name is the reliable selector — ffmpeg's device order (which the
+          // UI list uses) differs from the helper's AVCaptureDevice
+          // enumeration; the helper matches by name and falls back to index.
+          ...(src.deviceName ? ['--name', src.deviceName] : []),
+          '--size', src.size,
+          '--fps', String(src.fps),
+        ],
         { stdio: ['pipe', 'pipe', 'pipe'] } // stdin carries focus commands
       );
       this.#capture.stdin.on('error', () => {});

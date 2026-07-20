@@ -996,15 +996,21 @@ function connectEngineWs() {
   ws.onerror = () => ws.close();
 }
 
+function engineSource(running) {
+  const opt = refs.engineDevice.selectedOptions[0];
+  return {
+    running,
+    device: refs.engineDevice.value || '0',
+    deviceName: opt?.dataset.name || undefined, // reliable cross-backend selector
+    size: refs.engineSize.value || '1920x1080',
+    fps: Number(refs.engineFps.value) || 30,
+  };
+}
+
 refs.engineBtn.addEventListener('click', async () => {
   refs.engineBtn.disabled = true;
   try {
-    engineStatus = await setEngine({
-      running: !engineRunning(),
-      device: refs.engineDevice.value || '0',
-      size: refs.engineSize.value || '1920x1080',
-      fps: Number(refs.engineFps.value) || 30,
-    });
+    engineStatus = await setEngine(engineSource(!engineRunning()));
     applyEngineUi();
   } catch (err) {
     alert(`Engine: ${err.message}`);
@@ -1012,6 +1018,25 @@ refs.engineBtn.addEventListener('click', async () => {
     refs.engineBtn.disabled = false;
   }
 });
+
+// Changing camera / resolution / fps while the engine is running must switch
+// the live capture immediately — not silently wait for the next Start.
+async function applyEngineSourceChange() {
+  if (!engineRunning()) return; // takes effect when the user hits Start
+  refs.engineDevice.disabled = refs.engineSize.disabled = refs.engineFps.disabled = true;
+  setStatus('switching camera…', true);
+  try {
+    engineStatus = await setEngine(engineSource(true));
+    applyEngineUi();
+  } catch (err) {
+    alert(`Engine: ${err.message}`);
+  } finally {
+    refs.engineDevice.disabled = refs.engineSize.disabled = refs.engineFps.disabled = false;
+  }
+}
+for (const el of ['engineDevice', 'engineSize', 'engineFps']) {
+  refs[el].addEventListener('change', applyEngineSourceChange);
+}
 
 // --- toolbar ---
 function requireVideo() {
@@ -1283,12 +1308,23 @@ if ('serviceWorker' in navigator) {
     try {
       const { devices } = await (await fetch('/api/engine/devices')).json();
       const savedEngine = (await fetchConfig())?.engine ?? {};
-      const saved = String(savedEngine.device ?? '0');
-      refs.engineDevice.innerHTML = devices
-        .map((d) => `<option value="${d.index}">${d.index}: ${d.name}</option>`)
-        .join('');
-      refs.engineDevice.value = saved;
-      if (refs.engineDevice.value !== saved) refs.engineDevice.selectedIndex = 0;
+      refs.engineDevice.replaceChildren(
+        ...devices.map((d) => {
+          const o = document.createElement('option');
+          o.value = String(d.index);
+          o.dataset.name = d.name; // attribute-safe via DOM, not innerHTML
+          o.textContent = d.name;
+          return o;
+        })
+      );
+      // Restore the saved camera by NAME first (indices shift as devices come
+      // and go), then by index, else the first camera.
+      const byName = savedEngine.deviceName
+        ? [...refs.engineDevice.options].find((o) => o.dataset.name === savedEngine.deviceName)
+        : null;
+      if (byName) byName.selected = true;
+      else refs.engineDevice.value = String(savedEngine.device ?? '0');
+      if (!refs.engineDevice.selectedOptions.length) refs.engineDevice.selectedIndex = 0;
       if (savedEngine.size) refs.engineSize.value = savedEngine.size;
       if (savedEngine.fps) refs.engineFps.value = String(savedEngine.fps);
     } catch {}

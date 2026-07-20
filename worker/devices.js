@@ -26,7 +26,14 @@ export function listDevices() {
     }
     if (line.includes('AVFoundation audio devices')) break;
     const m = inVideo ? line.match(/\[(\d+)\]\s+(.+)$/) : null;
-    if (m) devices.push({ index: Number(m[1]), name: m[2].trim() });
+    if (m) {
+      const name = m[2].trim();
+      // Screen-capture pseudo-devices are not cameras; the native capture
+      // helper doesn't enumerate them either, so hiding them keeps the UI's
+      // device list aligned with what can actually be opened.
+      if (/^Capture screen \d+/i.test(name)) continue;
+      devices.push({ index: Number(m[1]), name });
+    }
   }
   return devices;
 }

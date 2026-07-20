@@ -116,12 +116,25 @@ export const routes = {
     const config = store.getConfig('app') ?? {};
     const source = {
       device: String(body.device ?? config.engine?.device ?? '0'),
+      // The name is the reliable selector: capture backends index cameras
+      // differently, so the engine matches by name and only falls back to
+      // the index. (≤ 64 chars, defensive.)
+      deviceName:
+        typeof body.deviceName === 'string'
+          ? body.deviceName.slice(0, 64)
+          : config.engine?.deviceName,
       size: body.size ?? config.engine?.size ?? '1920x1080',
       fps: Number(body.fps ?? config.engine?.fps ?? 30),
       ...(body.input ? { input: body.input, loop: Boolean(body.loop) } : {}),
     };
     // Persist enablement (file inputs are one-off runs, not remembered).
-    config.engine = { enabled: body.running && !body.input, device: source.device, size: source.size, fps: source.fps };
+    config.engine = {
+      enabled: body.running && !body.input,
+      device: source.device,
+      deviceName: source.deviceName,
+      size: source.size,
+      fps: source.fps,
+    };
     store.setConfig('app', config);
     if (body.running) {
       try {
